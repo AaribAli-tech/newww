@@ -1,0 +1,24 @@
+{
+  "characters": {
+    "blue": "soldier_blue.glb",
+    "red": "soldier_red.glb"
+  },
+  "animations": {
+    "idle": "anim_idle.glb",
+    "walk": "anim_walk.glb",
+    "run": "anim_run.glb",
+    "crouch": "anim_crouch.glb",
+    "death": "anim_death.glb"
+  },
+  "weapons": {
+    "rifle": "wpn_rifle.glb",
+    "smg": "wpn_smg.glb",
+    "sniper": "wpn_sniper.glb",
+    "shotgun": "wpn_shotgun.glb",
+    "pistol": "wpn_pistol.glb"
+  },
+  "hands": {
+    "right": "hand_right.glb",
+    "left": "hand_left.glb"
+  }
+}
