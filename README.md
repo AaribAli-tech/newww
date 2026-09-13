@@ -1,7 +1,7 @@
 # NUKETOWN — Vercel build
 
-A browser first-person shooter (5v5 Team Deathmatch and one-life Round Control on a 1962
-Nevada test site) that used to only run from a Windows folder via `PLAY.bat`. This repo now
+A browser first-person shooter on a 1962 Nevada test site — Team Deathmatch, Round Control,
+Free For All and Gun Game — that used to only run from a Windows folder via `PLAY.bat`. This repo now
 also carries a **static web build that deploys to Vercel as-is** — no server, no install for
 the player, no runtime, nothing to log into.
 
@@ -12,6 +12,35 @@ scripts/                ← the build: bundler, asset optimiser, local server, v
 Call of Duty Build/     ← the original offline Windows build, untouched (PLAY.bat still works)
 vercel.json             ← deploy config: static output + cache headers
 ```
+
+## The four modes
+
+| Mode | Teams | How it is won | Killstreaks |
+|---|---|---|---|
+| **Team Deathmatch** | 5v5 | first to 75 team kills, respawns on | UAV 4 · Airstrike 7 · Nuke 15 |
+| **Round Control** | 3v3 | one life per round, first to 3 rounds | UAV 4 · Airstrike 7, no nuke |
+| **Free For All** | none | 8 solos · first to **200 kills** — the bots race each other too | off, on purpose |
+| **Gun Game** | none | 4 rungs — M4A1 → MP5 → SPAS-12 → R700 — one kill each, finish first | off, on purpose |
+
+Rules live in `src/js/modes.js`, one class per playlist. `main.js` never hard-codes a mode: it
+asks for `onKill`, `canRespawn`, `hudState()`, `standings()` and `result()`. A teamless mode
+sets `noTeams` and the scoreboard gives it one sorted table instead of two invented squads.
+
+## What a kill does
+
+Every kill pays out twice, and the two counters are kept apart on purpose
+(`src/js/medals.js`, no DOM, no engine imports — `npm run test:rules` checks the maths):
+
+- a **medal stack** over the crosshair, revealed one at a time so a triple lands as a beat:
+  `KILL`, then `HEADSHOT`, then `DOUBLE KILL` / `TRIPLE KILL` / `MULTI KILL ×4` for kills
+  inside a 4.2-second window;
+- the **kill-streak strip** at the bottom: how many since you last died, what that is called
+  (`ON A ROLL` at 3 through to `RELENTLESS` at 25) and the fill toward the next name;
+- the **killfeed** down the right edge, which says who did it to whom with what.
+
+Death ends both, and losing a streak of three or more tells you so. The same kill also moves
+the mode: one rung up in Gun Game, one step closer to 200 in Free For All, and nothing at all
+in Round Control, where rounds are the score.
 
 ## Deploy it
 
@@ -110,6 +139,16 @@ your own death animation to finish before cutting over instead of fighting it fo
 `npm run verify` measures it (metres behind the head + the head inside the frame), so it cannot
 quietly become a first-person camera again.
 
+Also found while wiring the new modes: **a player kill never reached the game mode, and no mode
+was ever told the match had started.** `main.js` credited kills by calling `gamemode.addKill()`
+for the player and `gamemode.onKill()` for bots, which double-counted every bot-vs-bot kill
+(“first to 75” was really about 38), handed Round Control a round win every third player kill,
+and meant nothing at all arrived for *your* kills — so Gun Game could never advance and Free For
+All could never be won by the player. A kill now goes through `onKill()` exactly once and the mode
+decides what it is worth. `startMatch()` also used to hard-code a “TEAM DEATHMATCH — First to
+75” banner and never call `gamemode.onMatchStart()`, so three of the four modes announced the
+wrong rules at kickoff and Round Control opened on `ROUND 0`.
+
 And one bug found along the way: **the F-key performance readout was lying.** The post composer
 renders several passes per frame, and three resets `renderer.info` on every `render()`, so the
 overlay always reported `1 draws`. It now shows the true whole-frame totals — on this build,
@@ -133,6 +172,11 @@ Both the frame sampling and the optional probes are bounded, because a machine r
 SwiftShader (this sandbox does) can take seconds per frame: a screenshot, a key/mouse exercise or
 the reload that measures the repeat visit will report "could not be measured" instead of hanging the
 run, and budgets widen automatically on two-core boxes (or with `VERIFY_SLOW=1`).
+
+`npm run test:rules` needs no browser at all: 63 assertions over the medal chain, the streak
+names, who is hostile to whom, both teamless modes' win conditions and the "one kill, one
+credit" rule. It runs in about a second, which is why the rules are worth testing there rather
+than in the page.
 
 `npm run og` screenshots the live menu into `public/og.png` (1200×630) for link previews.
 

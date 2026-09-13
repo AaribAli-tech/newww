@@ -311,6 +311,17 @@ const kills = await race('the kill-feedback checks', () => page.evaluate(async (
     const txt = s => ((document.querySelector(s) || {}).textContent || '').replace(/\s+/g, ' ').trim();
     const p = G.player;
     const out = { before: { kills: p.kills, streak: p.killStreak } };
+    // startMatch keeps working after it returns (roster, spawn, mode hand-off),
+    // so wait for the state to say so rather than counting frames — a frame can
+    // take seconds under a software rasteriser and a fixed wait just races it.
+    const until = async (fn, ms = SLOW ? 120000 : 15000) => {
+        const t0 = Date.now();
+        for (;;) {
+            if (fn()) return true;
+            if (Date.now() - t0 > ms) return false;
+            await new Promise(r => setTimeout(r, 40));
+        }
+    };
 
     // three kills inside the chain window: KILL, then DOUBLE KILL, then TRIPLE +
     // HEADSHOT. Nothing per-frame here — the DOM is written once per kill.
@@ -327,7 +338,8 @@ const kills = await race('the kill-feedback checks', () => page.evaluate(async (
     G.setState('menu');
     document.querySelector('#modePick .mode[data-id=\"ffa\"]').click();
     await G.startMatch();
-    for (let i = 0; i < 4; i++) await new Promise(r => requestAnimationFrame(r));
+    const ffaUp = await until(() => G.state === 'playing' && G.gamemode.name === 'Free For All'
+        && G.bots.length > 0 && G.bots.every(b => b.allHostile === true));
     const ffa = G.gamemode;
     out.ffa = {
         name: ffa.name,
@@ -336,8 +348,8 @@ const kills = await race('the kill-feedback checks', () => page.evaluate(async (
         allBotsHostile: G.bots.every(b => b.allHostile === true),
         bothSpawnHalves: G.bots.every(b => (b.spawnPoints || []).length > 8),
         streakColHidden: document.getElementById('streakCol').classList.contains('hidden'),
-        hud: txt('#timer'),
-        state: G.state,
+        hud: txt('#modePrimary') || txt('#timer'),
+        state: G.state, modeReady: ffaUp,
         killfeedWorks: (() => { const n = document.querySelectorAll('#killfeed .kf').length; G.debugKill(false);
             return document.querySelectorAll('#killfeed .kf').length > n; })(),
         // a player kill must move the *mode*, not just the scoreboard
@@ -348,19 +360,35 @@ const kills = await race('the kill-feedback checks', () => page.evaluate(async (
     G.setState('menu');
     document.querySelector('#modePick .mode[data-id=\"gun\"]').click();
     await G.startMatch();
-    for (let i = 0; i < 4; i++) await new Promise(r => requestAnimationFrame(r));
+    await until(() => G.state === 'playing' && G.gamemode.name === 'Gun Game' && G.bots.length > 0);
     const gg = G.gamemode;
     const gunBefore = p.current, rungBefore = p._ggRung | 0;
     G.debugKill(false);
-    for (let i = 0; i < 6; i++) gg.update(1 / 60);        // the switch is applied by the mode
+    // The mode asks for the gun; the rig grants it once the previous swap has
+    // played out, so pump the player as well as the mode (player.update is what
+    // ticks the viewmodel) rather than waiting seconds for a rendered frame.
+    for (let i = 0; i < 90; i++) {
+        p.update(1 / 60, performance.now() / 1000 + i / 60);
+        gg.update(1 / 60);
+    }
     out.gun = {
         name: gg.name, rungs: gg.rungs,
-        hud: txt('#timer'), next: txt('#modeLine'),
+        hud: txt('#modePrimary'), next: txt('#modeLine'),
         rungBefore, rungAfter: p._ggRung | 0,
         gunBefore, gunAfter: p.current,
         botsClimbToo: G.bots.some(b => (b._ggRung | 0) >= 0 && b.weaponIndex >= 0),
         state: G.state
     };
+
+    // onMatchStart() wiring, checked on state rather than on a banner that lives
+    // 1.7 s: Round Control must open on round 1 in its freeze, not round 0.
+    G.setState('menu');
+    document.querySelector('#modePick .mode[data-id="ctl"]').click();
+    await G.startMatch();
+    const ctlUp = await until(() => G.state === 'playing' && G.gamemode.name === 'Round Control');
+    const ctl = G.gamemode;
+    out.ctl = { name: ctl.name, round: ctl.round, phase: ctl.phase, ready: ctlUp,
+        oneLife: ctl.canRespawn(G.player) === false };
 
     // back to the mode the run started in, so the numbers below are comparable
     G.setState('menu');
@@ -376,6 +404,7 @@ if (kills.error) {
         ` · feed ${kills.feedRows} row(s) · streak ${kills.streakText || 'off'}`);
     log(` free for all      ${kills.ffa.name} · ${kills.ffa.target} kills · hostile to all: ` +
         `${kills.ffa.allBotsHostile} · streaks hidden: ${kills.ffa.streakColHidden} · ${kills.ffa.hud}`);
+    log(` round control     opens on round ${kills.ctl && kills.ctl.round} · one life: ${kills.ctl && kills.ctl.oneLife}`);
     log(` gun game          ${kills.gun.rungs} rungs · your kill moved rung ` +
         `${kills.gun.rungBefore + 1} → ${kills.gun.rungAfter + 1} · weapon ${kills.gun.gunBefore} → ${kills.gun.gunAfter}`);
 }
@@ -385,8 +414,11 @@ const killsOk = !kills.error &&
     kills.feedRows >= 3 && kills.streakOn && kills.streak === kills.before.streak + 3 &&
     kills.ffa.noTeams === true && kills.ffa.target === 200 && kills.ffa.allBotsHostile === true &&
     kills.ffa.streakColHidden === true && kills.ffa.state === 'playing' && kills.ffa.scoreMoved === true &&
+    kills.ffa.modeReady === true &&
     kills.gun.rungs === 4 && kills.gun.rungAfter === kills.gun.rungBefore + 1 &&
-    kills.gun.gunAfter !== kills.gun.gunBefore && kills.gun.state === 'playing';
+    kills.gun.gunAfter !== kills.gun.gunBefore && kills.gun.state === 'playing' &&
+    kills.ffa.allBotsHostile === true &&
+    kills.ctl.ready === true && kills.ctl.round === 1 && kills.ctl.oneLife === true;
 
 // ── spectating a teammate must be a third-person shot ───────────────────────
 // The bug this catches: the spectator camera used to be placed on the teammate's

@@ -513,7 +513,17 @@ class FreeForAll extends BaseMode {
 
     onMatchStart() {
         this.reset();
+        // Mark the roster here as well as in update(): the first frame after
+        // Deploy can be a second away on a slow machine, and until every soldier
+        // knows the match has no teams they would be firing at their own side.
+        this._solofyAll();
         this.banner('FREE FOR ALL', '#FF7A18', `First to ${this.target} kills · everybody is the enemy`);
+    }
+
+    /** @private sweep every live roster entry; cheap and idempotent. */
+    _solofyAll() {
+        const bots = this.bots();
+        for (let i = 0; i < bots.length; i++) this._solofy(bots[i]);
     }
 
     /** Nothing short of reaching the target ends this match. */
@@ -544,7 +554,7 @@ class FreeForAll extends BaseMode {
     }
 
     _solofy(bot) {
-        if (!bot || bot.allHostile) return;
+        if (!bot) return;
         bot.allHostile = true;
         // Half of them push one way, half the other, so eight solos spread down
         // the street instead of all converging on the same corner house.
@@ -561,15 +571,9 @@ class FreeForAll extends BaseMode {
     update(dt) {
         this.scoring.update(dt);
         this._reconcile();
-        // Bots exist before the first reconcile can see them, so coat them at
-        // least once per frame until they are all marked. Cheap: a length check.
-        if (this._marked !== this.bots().length) this._markAll();
-    }
-
-    _markAll() {
-        const bots = this.bots();
-        for (let i = 0; i < bots.length; i++) this._solofy(bots[i]);
-        this._marked = bots.length;
+        // And keep sweeping: the roster can be rebuilt between frames, and one
+        // unmarked bot would be shooting at its own team in a mode with no teams.
+        this._solofyAll();
     }
 
     standings() {
@@ -648,6 +652,8 @@ class GunGame extends BaseMode {
         this.reset();
         this.banner('GUN GAME', '#FFC24A', `Run all ${this.rungs} weapons · every kill moves you up one`);
         this._equipPlayer(LADDER[0]);
+        const bots = this.bots();
+        for (let i = 0; i < bots.length; i++) this._solofy(bots[i]);
     }
 
     /**
@@ -657,13 +663,25 @@ class GunGame extends BaseMode {
      * farm each other to climb, exactly like you do.
      */
     _onSpawn(bot) {
-        if (bot && !bot.allHostile) {
-            bot.allHostile = true;
-            const both = [...(SPAWN_A && SPAWN_A.length ? SPAWN_A : FALLBACK_A),
-                ...(SPAWN_B && SPAWN_B.length ? SPAWN_B : FALLBACK_B)];
-            bot.spawnPoints = both;
-        }
+        this._solofy(bot);
         super._onSpawn(bot);
+    }
+
+    update(dt) {
+        super.update(dt);
+        // _reconcile only sees a bot when it flips alive↔dead, so catch anyone who
+        // arrived without the flag (a rebuilt roster, a late spawn).
+        const bots = this.bots();
+        for (let i = 0; i < bots.length; i++) if (bots[i] && !bots[i].allHostile) this._solofy(bots[i]);
+    }
+
+    _solofy(bot) {
+        if (!bot || bot.allHostile) return;
+        bot.allHostile = true;
+        // Both spawn clusters, so ten solos do not all arrive on one doorstep.
+        const both = [...(SPAWN_A && SPAWN_A.length ? SPAWN_A : FALLBACK_A),
+            ...(SPAWN_B && SPAWN_B.length ? SPAWN_B : FALLBACK_B)];
+        bot.spawnPoints = both;
     }
 
     /** Killstreaks are off, so a nuke can never be called. */

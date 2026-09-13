@@ -687,7 +687,12 @@ function startMatch() {
     grabPointer();
     A.playAmbient();
     A.playMatchStart();
-    hud.banner('TEAM DEATHMATCH', '#FF7A18', 'Nuketown — First to 75');
+    // The mode opens its own match. This used to be a hard-coded "TEAM DEATHMATCH
+    // — First to 75" banner, so Round Control, Free For All and Gun Game each
+    // announced the wrong rules at kickoff, and because nothing called
+    // onMatchStart() Round Control never numbered its first round (the HUD read
+    // ROUND 0) and Gun Game never put you on the first gun.
+    if (gamemode.onMatchStart) gamemode.onMatchStart();
 }
 
 function toMenu() {
