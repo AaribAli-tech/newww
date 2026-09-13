@@ -38,12 +38,25 @@ broken dependency chain becomes a broken deploy — which is exactly why the def
 If you set `PUBLIC_URL=https://your-app.vercel.app` before running `npm run build`, the
 `og:` tags point at absolute URLs and link previews work in Discord/X/Slack.
 
+## Or send someone a folder instead of a repo
+
+```bash
+npm run zip        # → nuketown-vercel-deploy.zip (~6.5 MB)
+```
+
+That package is self-sufficient: `public/` (the built game), `vercel.json`, the scripts,
+`src/js`, and a plain-text `DEPLOY.txt` walkthrough. `START.bat` in it plays the build on
+localhost with no `npm install` at all, because `serve.mjs` is pure Node and the site is already
+built. It deliberately excludes `src/assets` — the 13 MB of asset masters are only needed to
+*re* optimise, and `public/` already carries the compressed result.
+
 ## Play it locally
 
 ```bash
 npm install        # dev tooling only — the shipped site needs no dependencies
 npm run build      # src/ → public/
 npm start          # http://localhost:8420 with Vercel's headers and brotli
+npm run check      # run the exact build step Vercel runs, locally
 ```
 
 `npm start` is the drop-in replacement for `server.ps1`: same job, but it applies the same
