@@ -103,42 +103,17 @@ The things that actually stop it lagging:
   machines with headroom. Nothing here overrides that.
 
 Also fixed: **spectating a teammate in Round Control was not a spectator view.** The camera was
-placed on the teammate's *eye line* — inside their own head mesh — so the "glitch" was the inside of
-a helmet filling the screen. It is a real third-person shot now: behind and above their right
-shoulder, aimed where they are aimed, pulled in when a wall or doorframe is in the way, and it waits
-for your own death animation to finish before cutting over instead of fighting it for the camera.
+placed on the teammate's *eye line* — inside their own head mesh — so what you got was the inside of
+a helmet and a dark blob. It is a third-person chase shot now: behind and above their right
+shoulder, aimed where they aim, pulled in when a wall or doorframe is in the way, and it waits for
+your own death animation to finish before cutting over instead of fighting it for the camera.
+`npm run verify` measures it (metres behind the head + the head inside the frame), so it cannot
+quietly become a first-person camera again.
 
 And one bug found along the way: **the F-key performance readout was lying.** The post composer
 renders several passes per frame, and three resets `renderer.info` on every `render()`, so the
 overlay always reported `1 draws`. It now shows the true whole-frame totals — on this build,
 ~650-880 draw calls with 9 soldiers on a map batched down from 2112 meshes to 112.
-
-## On a phone
-
-The game plays on a phone in landscape. `src/js/touch.js` installs thumb controls when the device
-reports no hover and a coarse pointer — a touchscreen laptop keeps the mouse. Left thumb drags a
-floating move stick that appears wherever it lands; the whole right half of the screen is the look
-pad; FIRE is bottom-right with ADS / RLD / JUMP / CRH / SPR above it and the weapon slots above
-that; PAUSE is the labelled pill in the top-right corner, and the streak icons are tappable.
-
-Everything the buttons do is written into the same state the keyboard and mouse drive
-(`player.axis`, `player.mouseDown`, `player.addLookDelta()`), so there is no second implementation of
-movement or shooting to drift out of sync. Phones also get:
-
-- the HUD scaled about its corners — minimap to a quarter, ammo and health blocks to 40% — and
-  moved to the top edge, so no readout sits under a thumb;
-- a wider default field of view (88°), because a 78° viewmodel covers the target on a 6" screen;
-  the Settings slider still wins once you touch it;
-- portrait blocked: it pauses the match and shows a rotate prompt rather than letting you play a
-  400-pixel-tall letterbox;
-- every quality preset's pixel-ratio ceiling pulled down. A phone at `devicePixelRatio` 3 is filling
-  three screen pixels per CSS pixel, and the adaptive frame-time loop on top of that is what keeps
-  a mid-range Android at 60.
-
-`npm run verify:touch` boots the site inside emulated-phone metrics and asserts all of it — the
-stick accelerates the player, FIRE shoots and lets go when the finger lifts, pause releases every
-held control, portrait pauses and raises the rotate gate, the readouts are at the sizes above, and
-spectating a teammate is a third-person shot with the teammate inside the frame.
 
 ## Checking a build
 
@@ -154,9 +129,10 @@ It needs a browser — `npm i -D puppeteer`, or `CHROME_PATH=/usr/bin/chromium` 
 `puppeteer-core` in containers where Chrome's download is blocked. Point it at a deployment with
 `VERIFY_URL=https://your-app.vercel.app npm run verify`.
 
-`scripts/verify-touch.mjs` (`npm run verify:touch`) runs the same page under phone emulation and
-checks the thumb layer, the mobile HUD scaling, the portrait gate and the third-person spectator
-camera. Both accept `VERIFY_PORT` / `VERIFY_URL` and fall back to `puppeteer-core` + `CHROME_PATH`.
+Both the frame sampling and the optional probes are bounded, because a machine rendering through
+SwiftShader (this sandbox does) can take seconds per frame: a screenshot, a key/mouse exercise or
+the reload that measures the repeat visit will report "could not be measured" instead of hanging the
+run, and budgets widen automatically on two-core boxes (or with `VERIFY_SLOW=1`).
 
 `npm run og` screenshots the live menu into `public/og.png` (1200×630) for link previews.
 
@@ -179,11 +155,10 @@ folder as the archived single-file build it was.
 
 ## Notes and limits
 
-- **Pointer lock on a computer, thumb controls on a phone, WebGL2 everywhere.** A phone needs to be
-  held landscape (the game will ask) and a browser that can do WebGL2 — recent Safari on iOS, Chrome
-  on Android. Old or software-only WebGL2 fallbacks degrade to a lower resolution rather than
-  refusing to run, but a phone without hardware acceleration will be slow: that is the GPU, not the
-  page.
+- **Desktop only, on purpose.** It needs pointer lock, a mouse and WebGL2. A phone or tablet (no
+  hover + coarse pointer) gets a plain "Not available on mobile" panel over the menu with Deploy
+  disabled, rather than a match it cannot aim or shoot in — see `blockMobile()` in `src/js/main.js`.
+  There is deliberately no touch input path anywhere in the build.
 - Chrome or Edge are best. The game degrades rather than breaks: a missing or unreadable asset
   falls back to the procedural soldier/weapon/texture it was authored against.
 - The whole game is client-side — bots only. Vercel serves files; there is no backend to run, no

@@ -74,8 +74,20 @@ const browser = await launcher.launch({
  */
 async function snap(name, ms = SLOW ? 130000 : 40000) {
     const file = path.join(SHOTS, name);
+    // Park the render loop first. Capturing a page that is redrawing itself as fast
+    // as a software rasteriser can is how a *diagnostic* screenshot ends up costing
+    // minutes — and it keeps the renderer busy for every check that follows it.
+    const parked = await page.evaluate(() => {
+        if (!window.requestAnimationFrame || window.__rafParked) return false;
+        window.__rafParked = window.requestAnimationFrame;
+        window.requestAnimationFrame = () => 0;
+        return true;
+    }).catch(() => false);
     const shot = page.screenshot({ path: file }).then(() => true).catch(() => false);
     const won = await Promise.race([shot, new Promise(res => setTimeout(() => res(false), ms))]);
+    if (parked) await page.evaluate(() => {
+        if (window.__rafParked) { window.requestAnimationFrame = window.__rafParked; window.__rafParked = null; }
+    }).catch(() => {});
     if (!won) log(`   (skipped ${name}: the page could not produce a frame in ${ms / 1000}s)`);
     return won;
 }
@@ -289,6 +301,59 @@ await attempt('the shooting/keybind exercise', () => page.evaluate(async () => {
     return true;
 }));
 
+// ── spectating a teammate must be a third-person shot ───────────────────────
+// The bug this catches: the spectator camera used to be placed on the teammate's
+// own eye line — inside their head mesh — so a dead player in Round Control saw
+// the inside of a helmet instead of their squadmate. Two geometric assertions
+// make that impossible to regress: the camera has to sit several metres BEHIND
+// the operator's head, and the head has to be INSIDE the frame.
+const spec = await race('the spectator check', () => page.evaluate(() => {
+    const G = window.__nuketown;
+    const p = G.player;
+    if (!p) return { error: 'no player rig' };
+    // Round Control is the mode that keeps you down and makes you spectate. Rather
+    // than rebuilding the match to switch to it — which costs seconds when a frame
+    // does — flip the one property that path reads, and put it back at the end.
+    const wasRespawn = G.gamemode.canRespawn;
+    G.gamemode.canRespawn = () => false;
+    for (const b of G.bots) if (b.team === p.team) b.health = 99999;
+    p.paused = false;
+    p.spawnProtect = 0;                   // spawn protection would eat the shot
+    p.takeDamage(9999, 'VERIFY', { x: p.position.x + 3, y: 0, z: p.position.z + 3 });
+    if (p.alive) { p.health = 0; p.alive = false; }
+    p.deathT = 3;                         // let the death collapse have finished (1.05 s)
+    for (let i = 0; i < 8; i++) G.spectateStep(1 / 60);
+    const t = G.specTarget;
+    G.gamemode.canRespawn = wasRespawn;
+    if (!t) return { error: 'no living teammate to watch' };
+    const c = G.camera;
+    const hx = t.position.x, hy = t.position.y + 1.6, hz = t.position.z;
+    const dist = Math.hypot(c.position.x - hx, c.position.y - hy, c.position.z - hz);
+    const fx = -Math.sin(c.rotation.y) * Math.cos(c.rotation.x);
+    const fy = Math.sin(c.rotation.x);
+    const fz = -Math.cos(c.rotation.y) * Math.cos(c.rotation.x);
+    const vx = hx - c.position.x, vy = hy - c.position.y, vz = hz - c.position.z;
+    const vl = Math.hypot(vx, vy, vz) || 1;
+    return {
+        dist, facing: (vx * fx + vy * fy + vz * fz) / vl, near: c.near,
+        raised: c.position.y - t.position.y, fov: Math.round(c.fov),
+        name: document.getElementById('specName').textContent.trim(),
+        banner: document.getElementById('spectate').classList.contains('on')
+    };
+}), SLOW ? 180000 : 45000) || { error: 'the page was too busy to answer' };
+
+if (spec.error) {
+    log(`\n spectator        could not be measured (${spec.error})`);
+} else {
+    log(`\n spectator        ${spec.dist.toFixed(2)} m behind ${JSON.stringify(spec.name)}` +
+        ` · target ${spec.facing > 0.5 ? 'in frame' : 'OUT OF FRAME'} · ${spec.raised.toFixed(2)} m above` +
+        ` their feet · fov ${spec.fov} · banner ${spec.banner ? 'on' : 'off'}`);
+}
+// third person = clearly behind the head, head inside the frame, not clipped by the
+// near plane. Anything tighter and this is a first-person camera again.
+const specOk = !spec.error && spec.dist > 1.6 && spec.facing > 0.5 && spec.dist > spec.near * 4
+    && spec.banner;
+
 // ── repeat visit: the shell cache should turn this into a disk read ─────────
 const sw = await race('the service-worker probe', () => page.evaluate(async () => {
     if (!('serviceWorker' in navigator)) return { supported: false };
@@ -305,7 +370,7 @@ const sw = await race('the service-worker probe', () => page.evaluate(async () =
     } catch (err) {
         return { supported: true, error: String(err && err.message || err) };
     }
-}), SLOW ? 90000 : 40000) || { supported: false, unmeasured: true };
+}), SLOW ? 180000 : 40000) || { supported: false, unmeasured: true };
 log(`\n service worker    ${sw.unmeasured ? 'probe timed out — run again on a faster machine'
     : sw.registered ? 'active, ' + sw.entries + ' entries cached'
     : 'not active' + (sw.error ? ' (' + sw.error + ')' : '')}`);
@@ -357,7 +422,8 @@ log(` console warnings ${warnings.length ? '\n   ' + warnings.slice(0, 8).join('
 
 const reloadOk = !reloadProblem && (!sw.registered || reloadWire < firstWire * 0.25);
 const ok = errors.length === 0 && failed.length === 0 && missing.length === 0 &&
-    report.scene.skinned > 0 && live.bots > 0 && report.assets.soldiers && report.assets.viewmodels && reloadOk;
+    report.scene.skinned > 0 && live.bots > 0 && report.assets.soldiers && report.assets.viewmodels &&
+    reloadOk && specOk;
 // a real repeat-visit win: the shell cache must keep the second load off the wire
 if (sw.registered && firstWire > 0 && reloadWire > firstWire * 0.25) {
     log('   note: the repeat visit still pulled a sizeable share from the network');

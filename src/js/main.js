@@ -17,16 +17,18 @@ import { characterAssets } from './character.js';
 import { vmAssets, vmAssetsReady } from './vmassets.js';
 import { upgradeTextures, photoStatus } from './materials.js';
 import { mergeStaticScene, mergeRig, pruneShadowCasters } from './optimize.js';
-import { installTouchControls } from './touch.js';
 import { WEAPON_DEFS } from './weapons.js';
 import { TEAM_A, TEAM_B, BOT_NAMES_A, BOT_NAMES_B, randElement, clamp, shuffle } from './utils.js';
 import * as A from './audio.js';
 
 const canvas = document.getElementById('gameCanvas');
-// A phone or tablet: no hover, coarse pointer. Deliberately not
-// `navigator.maxTouchPoints`, which is true on touchscreen laptops where the
-// mouse and keyboard are obviously the better answer.
-const IS_TOUCH = !!(window.matchMedia && window.matchMedia('(hover: none) and (pointer: coarse)').matches);
+// A phone or tablet: nothing to hover with, and a finger on glass. This game is
+// authored for a mouse — pointer lock for aim, a held button for a 780 RPM
+// trigger — so on a touch device we say so up front instead of handing over a
+// menu that leads to a frozen crosshair. Deliberately `(hover: none) and
+// (pointer: coarse)` rather than `maxTouchPoints`, which is also true of
+// touchscreen laptops that can and do play fine.
+const NOT_ON_MOBILE = !!(window.matchMedia && window.matchMedia('(hover: none) and (pointer: coarse)').matches);
 const $ = id => document.getElementById(id);
 
 let renderer, scene, camera, sun, composerFX, sky, dust;
@@ -79,11 +81,7 @@ const QUALITY = [
 // Start on Low. A first run that stutters is a much worse first impression than
 // one that looks slightly plainer, and the auto-tuner raises the preset within
 // a few seconds on any machine with headroom to spare.
-// Phones get a wider default field of view. The same viewmodel that reads well on
-// a desktop monitor covers half a 6" screen at 78°, and the gun ends up sitting on
-// top of the target — the one thing the Settings slider can fix without touching the
-// render cost. Anything already saved by the player still wins.
-const DEFAULTS = { sens: 1.0, fov: IS_TOUCH ? 88 : 78, quality: 0 };
+const DEFAULTS = { sens: 1.0, fov: 78, quality: 0 };
 let settings = { ...DEFAULTS };
 
 function loadSettings() {
@@ -97,12 +95,9 @@ function saveSettings() {
 }
 
 const _v = new THREE.Vector3();
-let touch = null;                 // touch.js handle, installed once on touch devices
-const _specWant = new THREE.Vector3();
 const _specFrom = new THREE.Vector3();
+const _specWant = new THREE.Vector3();
 const _specDir = new THREE.Vector3();
-let specSnap = true;
-let specLive = false;      // has the chase cam taken over from the death fall yet
 
 // A missing GPU blocklist entry or a disabled "hardware acceleration" flag used to
 // mean an eternal loading bar. Say what is wrong instead.
@@ -221,7 +216,6 @@ function warmShaders() {
  * Unhandled, every respawn threw an uncaught rejection into the console.
  */
 function grabPointer() {
-    if (IS_TOUCH) return;   // no pointer lock on a phone; touch.js drives input
     const r = canvas.requestPointerLock();
     if (r && typeof r.catch === 'function') r.catch(() => { /* user can click to re-lock */ });
 }
@@ -333,7 +327,6 @@ function setupPlayerRig() {
 
 function setupPost() {
     composerFX = createPostFX(renderer, scene, camera, vm);
-    if (IS_TOUCH) setupTouch();
     warmShaders();
     loadSettings();
     applyQuality();
@@ -343,56 +336,6 @@ function setupPost() {
         camera.fov = settings.fov;
         camera.updateProjectionMatrix();
     }
-}
-
-/**
- * Thumb controls, the phone-sized HUD and the "turn your phone sideways" gate.
- * Called from setupPost because it needs the player rig to exist.
- */
-function setupTouch() {
-    touch = installTouchControls({
-        getPlayer: () => player,
-        cw,
-        // a tap (not a drag) on the look pad is the touch equivalent of the
-        // desktop "click to switch teammate" gesture
-        onCycleSpectate: () => {
-            if (state === 'playing' && player && !player.alive && specTarget) cycleSpectate(1);
-        }
-    });
-    if (player) player.touchMode = true;
-    document.body.classList.add('touch');
-    // A phone GPU is filling 3 screen pixels per CSS pixel at devicePixelRatio 3.
-    // Pull every preset's ceiling down so "High" on a phone is what "Medium" is
-    // on a laptop, and the auto-tuner still has somewhere to climb to.
-    for (const q of QUALITY) q.dprCap = Math.min(q.dprCap, q.dprCap * 0.72 + 0.14);
-    applyQuality();
-    $('menuFoot').innerHTML = 'Turn your phone sideways to play &nbsp;•&nbsp; Nevada Atomic Test Site, 1962';
-    $('pauseHint').textContent = 'Pause button — top right';
-    applyOrientation();
-    // Three signals, because mobile browsers disagree about which one they send:
-    // `orientationchange` (the native one, but it fires before the metrics settle,
-    // hence the delay), `resize` (Android's URL bar hides through this), and the
-    // orientation media query — the only one that reliably fires when a desktop
-    // window is dragged tall, which is what our emulated-device tests do.
-    window.addEventListener('orientationchange', () => setTimeout(applyOrientation, 220));
-    window.addEventListener('resize', applyOrientation);
-    const orient = window.matchMedia && window.matchMedia('(orientation: portrait)');
-    if (orient) {
-        if (orient.addEventListener) orient.addEventListener('change', applyOrientation);
-        else if (orient.addListener) orient.addListener(applyOrientation);
-    }
-}
-
-/**
- * Landscape only. Portrait pauses the match and covers the screen rather than
- * letting someone play a 200 px tall letterbox, and returning to landscape
- * leaves it paused so nobody resumes mid-gunfight to a cold screen.
- */
-function applyOrientation() {
-    const portrait = IS_TOUCH && window.innerHeight > window.innerWidth * 0.92;
-    if (portrait && state === 'playing') { pause(true); return portrait; }
-    syncTouchUI();
-    return portrait;
 }
 
 function finishBoot() {
@@ -414,8 +357,8 @@ function finishBoot() {
         get camera() { return camera; },
         get specTarget() { return specTarget; },
         cycleSpectate,
-        // one frame of the spectator camera, callable without rendering — the
-        // mobile verifier asserts on the shot this produces
+        // one frame of the spectator camera, callable without rendering —
+        // scripts/verify.mjs asserts on the shot this produces
         spectateStep: updateSpectator,
         get cw() { return cw; },
         get streaks() { return streaks; },
@@ -434,7 +377,7 @@ function finishBoot() {
         },
         step: (n = 1, ms = 16) => { for (let i = 0; i < n; i++) loop(last + ms); },
         setState: s => { state = s; },
-        startMatch, toMenu, THREE
+        startMatch, THREE
     };
     // Repeat visits skip the download entirely: the shell caches the models,
     // textures and fonts once they have been fetched. Skipped on http (the
@@ -445,7 +388,34 @@ function finishBoot() {
         navigator.serviceWorker.register('./sw.js', { scope: './' }).catch(() => { /* optional */ });
     }
 
+    if (NOT_ON_MOBILE) blockMobile();
+
     requestAnimationFrame(loop);
+}
+
+/**
+ * Cover the menu with "not available on mobile" and take Deploy out of reach.
+ *
+ * Not a punishment — a phone browser will happily run WebGL2 and drop you into a
+ * match you cannot aim or shoot in, which reads as a broken game rather than an
+ * unsupported one. The notice is honest, and the code never pretends otherwise:
+ * there is no touch input path in this build at all.
+ */
+function blockMobile() {
+    const gate = document.getElementById('notMobile');
+    if (gate) gate.classList.add('on');
+    const pick = $('modePick');
+    if (pick) pick.style.display = 'none';
+    const foot = $('menuFoot');
+    if (foot) foot.innerHTML = 'Needs a mouse and keyboard &nbsp;•&nbsp; open this link on a laptop or desktop';
+    const start = $('btnStart');
+    if (start) {
+        start.disabled = true;
+        start.textContent = 'Desktop only';
+        start.title = 'This build needs a mouse and keyboard';
+    }
+    const hint = $('pauseHint');
+    if (hint) hint.style.display = 'none';
 }
 
 // ── UI wiring ───────────────────────────────────────────────────────────────
@@ -540,14 +510,8 @@ function bindUI() {
     window.addEventListener('resize', onResize);
 }
 
-let lastResizeW = 0, lastResizeH = 0;
 function onResize() {
     const w = window.innerWidth, h = window.innerHeight;
-    // iOS/Android resize the viewport every time the URL bar slides away, and a
-    // resize here re-allocates the render targets and the composer — worth
-    // ignoring when nothing actually changed size.
-    if (w === lastResizeW && h === lastResizeH) return;
-    lastResizeW = w; lastResizeH = h;
     camera.aspect = w / h;
     camera.updateProjectionMatrix();
     renderer.setPixelRatio(curDpr);
@@ -673,7 +637,7 @@ function startMatch() {
     gamemode.reset();
     // Hands the HUD the ruleset: it labels the mode line, takes the score limit
     // from the mode (Round Control wins at 3 rounds, not 75 kills) and hides the
-    // streak row for modes that do not use killstreaks.
+    // streak row for modes that do not use killstreaks. Nothing used to call this.
     hud.setMode(gamemode);
     streaks.reset();
     effects.clearHoles();
@@ -707,7 +671,6 @@ function startMatch() {
 
     state = 'playing';
     grabPointer();
-    syncTouchUI();
     A.playAmbient();
     A.playMatchStart();
     hud.banner('TEAM DEATHMATCH', '#FF7A18', 'Nuketown — First to 75');
@@ -715,7 +678,6 @@ function startMatch() {
 
 function toMenu() {
     state = 'menu';
-    if (touch) { touch.releaseAll(); touch.setVisible(false); }
     hud.show(false);
     hud.hideDeath();
     hud.hideEnd();
@@ -730,30 +692,13 @@ function pause(on) {
     state = on ? 'paused' : 'playing';
     player.paused = on;
     $('pause').classList.toggle('on', on);
-    if (on) {
-        document.exitPointerLock();
-        // a paused screen with FIRE still held down would empty a mag the moment
-        // the player comes back, and a stuck stick walks them into a wall
-        if (touch) touch.releaseAll();
-    } else {
-        grabPointer();
-    }
-    syncTouchUI();
-}
-
-/** Show the thumb controls only while a match is actually being played. */
-function syncTouchUI() {
-    if (!touch) return;
-    const portrait = IS_TOUCH && window.innerHeight > window.innerWidth * 0.92;
-    touch.setVisible(state === 'playing' && !portrait);
-    document.getElementById('rotate') &&
-        document.getElementById('rotate').classList.toggle('on', portrait);
+    if (on) document.exitPointerLock();
+    else grabPointer();
 }
 
 function endMatch() {
     if (state === 'ended') return;
     state = 'ended';
-    if (touch) { touch.releaseAll(); touch.setVisible(false); }
     player.paused = true;
     document.exitPointerLock();
     hud.hideDeath();
@@ -865,18 +810,20 @@ function handleBotEvents(bot, events) {
 }
 
 // ── spectator (round modes) ─────────────────────────────────────────────────
-// Dead in a one-life round? You watch a surviving teammate. Tap/click to move to
-// the next one.
+// Dead in a one-life round? You watch a surviving teammate. Click to move to the
+// next one.
 //
 // This is a THIRD PERSON shot: the camera hangs behind and above the operator,
 // aimed the way they are aimed, so you can read their position, their animation
 // and who they are shooting. It used to sit exactly on their eye line, which put
 // the head mesh inside the near plane — all you got was the inside of a helmet
 // and a dark blob where a teammate should have been.
-const SPEC_BACK = 4.1;     // metres behind the operator
-const SPEC_UP = 0.95;      // metres above their head
-const SPEC_SHOULDER = 0.55;  // offset so the back of the head does not fill the frame
+const SPEC_BACK = 4.1;        // metres behind the operator
+const SPEC_UP = 0.95;         // metres above their head
+const SPEC_SHOULDER = 0.55;   // offset so the back of the head does not fill the frame
 let specTarget = null;
+let specSnap = true;   // jump to the pose instead of sliding there
+let specLive = false;  // has the chase cam taken over from the death fall yet
 
 function livingTeammates() {
     return bots.filter(b => b.team === player.team && b.alive);
@@ -914,8 +861,8 @@ function updateSpectator(dt = 0.016) {
     const pitch = t.aimPitch || 0;
     _specFrom.set(t.position.x, t.position.y + (t.eyeY || (t.isCrouching ? 1.02 : 1.58)) + 0.06, t.position.z);
 
-    // "forward" in the game's convention (yaw 0 looks down -Z), lifted by their
-    // aim pitch so the camera tracks a soldier looking over a roof or down a stair
+    // "forward" in this game's convention (yaw 0 looks down -Z), lifted by their
+    // aim pitch so the shot tracks a soldier looking over a roof or down stairs
     const cp = Math.cos(pitch);
     const fx = -Math.sin(yaw) * cp, fz = -Math.cos(yaw) * cp, fy = Math.sin(pitch);
     _specWant.set(
@@ -925,9 +872,9 @@ function updateSpectator(dt = 0.016) {
     );
 
     // Pull the shot in when a wall or doorframe is in the way, so an operator
-    // standing in a doorway does not put the camera out in the street behind
-    // the house. The visual meshes are merged, but collision is per-AABB, which
-    // is exactly what a spectator cam wants to test against.
+    // standing in a doorway does not put the camera out in the street behind the
+    // house. Visual meshes are merged, but collision is per-AABB, which is
+    // exactly what a spectator cam wants to test against.
     _specDir.subVectors(_specWant, _specFrom);
     const want = _specDir.length();
     if (want > 0.001) {
@@ -937,8 +884,8 @@ function updateSpectator(dt = 0.016) {
         if (allow < want) _specWant.copy(_specFrom).addScaledVector(_specDir, allow);
     }
 
-    // damp so following a running teammate is smooth, but snapping onto the
-    // camera every time the target changes would be nauseating
+    // Damped so following a running teammate is smooth; a hard snap every time the
+    // target changes would be nauseating, which is why specSnap only covers cuts.
     const k = specSnap ? 1 : Math.min(1, 1 - Math.exp(-dt * 16));
     specSnap = false;
     camera.position.lerp(_specWant, k);
@@ -946,8 +893,8 @@ function updateSpectator(dt = 0.016) {
     camera.rotation.y = yaw;
     camera.rotation.x = pitch;
     camera.rotation.z = 0;
-    // slightly wider than the player's own FOV: this is a shot of a person, not
-    // a look down a sight, and the extra frame keeps them in view when they turn
+    // slightly wider than the player's own FOV: this is a shot of a person, not a
+    // look down a sight, and the extra frame keeps them in view when they turn
     const fov = Math.min(94, Math.max(74, (player.baseFov || 78) + 8));
     if (camera.fov !== fov) { camera.fov = fov; camera.updateProjectionMatrix(); }
     hud.spectate(t.name, mates.length);

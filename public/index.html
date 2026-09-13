@@ -2,11 +2,11 @@
 <html lang="en">
 <head>
 <meta charset="UTF-8">
-<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>NUKETOWN</title>
 
-<link rel="stylesheet" href="/css/styles.4304fae10c.css">
-<link rel="preload" as="script" crossorigin href="/js/game.b545fbcadd.js">
+<link rel="stylesheet" href="/css/styles.e1f16158ca.css">
+<link rel="preload" as="script" crossorigin href="/js/game.8bab6380d4.js">
 <link rel="preload" as="font" type="font/woff2" crossorigin href="/fonts/rajdhani-400.759a9000e4.woff2">
 <link rel="preload" as="font" type="font/woff2" crossorigin href="/fonts/teko-700.a57552efb2.woff2">
 <link rel="icon" href="/favicon.svg" type="image/svg+xml">
@@ -14,7 +14,7 @@
 <link rel="manifest" href="/manifest.webmanifest">
 <meta name="theme-color" content="#06080b">
 <meta name="color-scheme" content="dark">
-<meta name="description" content="NUKETOWN - a browser first-person shooter. 5v5 Team Deathmatch and one-life Round Control on a 1962 desert test site. No install, no login: click Deploy. Mouse and keyboard on a computer, thumb controls on a phone.">
+<meta name="description" content="NUKETOWN - a browser first-person shooter. 5v5 Team Deathmatch and one-life Round Control on a 1962 desert test site. No install, no login: click Deploy.">
 <meta property="og:type" content="website">
 <meta property="og:title" content="NUKETOWN - browser FPS">
 <meta property="og:description" content="5v5 Team Deathmatch and one-life Round Control in your browser. No install, no login - click Deploy.">
@@ -52,20 +52,17 @@
 <div id="panel">
   <div class="card">
     <h2>Controls</h2>
-    <div class="kv desk"><span>Move</span><b>W A S D</b></div>
-    <div class="kv desk"><span>Sprint</span><b>SHIFT</b></div>
-    <div class="kv desk"><span>Crouch</span><b>C  /  CTRL</b></div>
-    <div class="kv desk"><span>Jump</span><b>SPACE</b></div>
-    <div class="kv desk"><span>Fire</span><b>LEFT MOUSE</b></div>
-    <div class="kv desk"><span>Aim down sights</span><b>RIGHT MOUSE</b></div>
-    <div class="kv desk"><span>Reload</span><b>R</b></div>
-    <div class="kv desk"><span>Weapons</span><b>1 – 4  /  Q  /  WHEEL</b></div>
-    <div class="kv desk"><span>UAV / Airstrike / Nuke</span><b>Z &nbsp; X &nbsp; V</b></div>
-    <div class="kv desk"><span>Scoreboard</span><b>TAB</b></div>
-    <div class="kv desk"><span>Pause</span><b>ESC</b></div>
-    <div class="kv phone"><span>Phone — move</span><b>LEFT THUMB, DRAG</b></div>
-    <div class="kv phone"><span>Phone — aim / shoot</span><b>RIGHT THUMB · FIRE BUTTON</b></div>
-    <div class="kv phone"><span>Phone — spectate</span><b>TAP THE RIGHT SIDE</b></div>
+    <div class="kv"><span>Move</span><b>W A S D</b></div>
+    <div class="kv"><span>Sprint</span><b>SHIFT</b></div>
+    <div class="kv"><span>Crouch</span><b>C  /  CTRL</b></div>
+    <div class="kv"><span>Jump</span><b>SPACE</b></div>
+    <div class="kv"><span>Fire</span><b>LEFT MOUSE</b></div>
+    <div class="kv"><span>Aim down sights</span><b>RIGHT MOUSE</b></div>
+    <div class="kv"><span>Reload</span><b>R</b></div>
+    <div class="kv"><span>Weapons</span><b>1 – 4  /  Q  /  WHEEL</b></div>
+    <div class="kv"><span>UAV / Airstrike / Nuke</span><b>Z &nbsp; X &nbsp; V</b></div>
+    <div class="kv"><span>Scoreboard</span><b>TAB</b></div>
+    <div class="kv"><span>Pause</span><b>ESC</b></div>
     <div class="rowSet">
       <label>Sensitivity</label>
       <input type="range" id="sensRange" min="20" max="400" value="100">
@@ -172,11 +169,20 @@
 </div>
 
 
-<!-- portrait gate — only ever shown on a touch device (see applyOrientation) -->
-<div id="rotate">
-  <div class="rphone"><span></span></div>
-  <h2>Turn your phone</h2>
-  <p>NUKETOWN is a landscape game &nbsp;&bull;&nbsp; rotate to deploy</p>
+<!-- the phone/tablet gate: this build is mouse-driven, so we say so plainly -->
+<div id="notMobile" role="alertdialog" aria-label="Not available on mobile">
+  <div class="nmCard">
+    <h2>Not available on mobile</h2>
+    <p>
+      NUKETOWN is built around a mouse: pointer-locked aim, a held trigger, four
+      weapon keys. A finger on glass cannot do that justice, so there is no touch
+      version to fall back to &mdash; this is a computer game.
+    </p>
+    <div class="nmKeys">
+      <kbd>W A S D</kbd><kbd>MOUSE AIM</kbd><kbd>LMB FIRE</kbd><kbd>R RELOAD</kbd><kbd>ESC PAUSE</kbd>
+    </div>
+    <p class="nmGo">Open this link on a laptop or desktop to play</p>
+  </div>
 </div>
 
 <div id="scope">
@@ -240,6 +246,6 @@
   </div>
 </div>
 
-<script type="module" src="/js/game.b545fbcadd.js"></script>
+<script type="module" src="/js/game.8bab6380d4.js"></script>
 </body>
 </html>
