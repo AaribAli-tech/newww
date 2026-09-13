@@ -1,0 +1,234 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>NUKETOWN</title>
+
+<link rel="stylesheet" href="/css/styles.e59f31b48e.css">
+<link rel="preload" as="script" crossorigin href="/js/game.c847eb1b01.js">
+<link rel="preload" as="font" type="font/woff2" crossorigin href="/fonts/rajdhani-400.759a9000e4.woff2">
+<link rel="preload" as="font" type="font/woff2" crossorigin href="/fonts/teko-700.a57552efb2.woff2">
+<link rel="icon" href="/favicon.svg" type="image/svg+xml">
+<link rel="apple-touch-icon" href="/icons/apple-touch-icon.png">
+<link rel="manifest" href="/manifest.webmanifest">
+<meta name="theme-color" content="#06080b">
+<meta name="color-scheme" content="dark">
+<meta name="description" content="NUKETOWN - a browser first-person shooter. 5v5 Team Deathmatch and one-life Round Control on a 1962 desert test site. No install, no login: click Deploy.">
+<meta property="og:type" content="website">
+<meta property="og:title" content="NUKETOWN - browser FPS">
+<meta property="og:description" content="5v5 Team Deathmatch and one-life Round Control in your browser. No install, no login - click Deploy.">
+<meta property="og:image" content="/og.png">
+<meta property="og:url" content="/">
+<meta name="twitter:card" content="summary_large_image">
+<meta name="twitter:image" content="/og.png">
+</head>
+<body>
+
+<canvas id="gameCanvas"></canvas>
+
+<!-- ════════ LOADER ════════ -->
+<div id="loader">
+  <h1>NUKETOWN</h1>
+  <div id="loadBarOuter"><div id="loadBar"></div></div>
+  <div id="loadMsg">Initialising</div>
+</div>
+
+<!-- ════════ MENU ════════ -->
+<div id="menu">
+  <div class="menuInner">
+    <h1>NUKE<span>TOWN</span></h1>
+    <div class="subrule"><i></i><span id="menuModeTag">Team Deathmatch</span><i></i></div>
+    <div id="modePickLabel">Select playlist</div>
+    <div id="modePick"></div>
+    <button class="menuBtn primary" id="btnStart">Deploy</button>
+    <button class="menuBtn" id="btnControls">Controls</button>
+    <button class="menuBtn" id="btnMute">Sound: On</button>
+  </div>
+  <div id="menuFoot">Nevada Atomic Test Site &nbsp;•&nbsp; 1962</div>
+</div>
+
+<!-- ════════ CONTROLS / SETTINGS ════════ -->
+<div id="panel">
+  <div class="card">
+    <h2>Controls</h2>
+    <div class="kv"><span>Move</span><b>W A S D</b></div>
+    <div class="kv"><span>Sprint</span><b>SHIFT</b></div>
+    <div class="kv"><span>Crouch</span><b>C  /  CTRL</b></div>
+    <div class="kv"><span>Jump</span><b>SPACE</b></div>
+    <div class="kv"><span>Fire</span><b>LEFT MOUSE</b></div>
+    <div class="kv"><span>Aim down sights</span><b>RIGHT MOUSE</b></div>
+    <div class="kv"><span>Reload</span><b>R</b></div>
+    <div class="kv"><span>Weapons</span><b>1 – 4  /  Q  /  WHEEL</b></div>
+    <div class="kv"><span>UAV / Airstrike / Nuke</span><b>Z &nbsp; X &nbsp; V</b></div>
+    <div class="kv"><span>Scoreboard</span><b>TAB</b></div>
+    <div class="kv"><span>Pause</span><b>ESC</b></div>
+    <div class="rowSet">
+      <label>Sensitivity</label>
+      <input type="range" id="sensRange" min="20" max="400" value="100">
+      <output id="sensOut">1.00</output>
+    </div>
+    <div class="rowSet">
+      <label>Field of view</label>
+      <input type="range" id="fovRange" min="65" max="105" value="78">
+      <output id="fovOut">78</output>
+    </div>
+    <div class="rowSet">
+      <label>Quality</label>
+      <select id="qualitySel">
+        <option value="0">Low — fastest</option>
+        <option value="1" selected>Medium — balanced</option>
+        <option value="2">High — best looking</option>
+      </select>
+      <output id="fpsOut">—</output>
+    </div>
+    <div style="font-size:12px;letter-spacing:1px;color:rgba(255,255,255,.35);margin-top:2px">
+      Resolution scales automatically to hold 60 FPS within the chosen quality.
+    </div>
+    <button class="menuBtn" id="btnPanelClose" style="margin-top:14px">Back</button>
+  </div>
+</div>
+
+<!-- ════════ HUD ════════ -->
+<div id="hud">
+  <div id="crosshair">
+    <div class="ch v" id="chT"></div><div class="ch v" id="chB"></div>
+    <div class="ch h" id="chL"></div><div class="ch h" id="chR"></div>
+    <div id="chDot"></div>
+  </div>
+  <div id="hitmarker"><i></i><i></i><i></i><i></i></div>
+
+  <div id="miniWrap">
+    <canvas id="miniCanvas" width="400" height="400"></canvas>
+    <div id="miniMark"></div>
+    <div id="uavTag">UAV</div>
+  </div>
+
+  <div id="matchBar">
+    <div id="teamBars">
+      <div class="tb a"><span class="sc" id="scoreA">0</span><i class="bar"><b id="barA"></b></i></div>
+      <div class="tb b"><span class="sc" id="scoreB">0</span><i class="bar"><b id="barB"></b></i></div>
+    </div>
+    <div id="roundPips"><span id="pipsA"></span><em id="livesTag"></em><span id="pipsB"></span></div>
+    <div id="matchFoot">
+      <span id="timer">10:00</span>
+      <span id="modeLine">Team Deathmatch</span>
+    </div>
+    <div id="modeState"><b id="modePrimary"></b><span id="modeSecondary"></span></div>
+  </div>
+
+  <div id="nukeTrack">
+    <div id="ntHead">
+      <span id="ntLabel">Tactical Nuke</span>
+      <span id="ntCount"><b>0</b> / 15 KILLS</span>
+    </div>
+    <div id="ntBar"></div>
+    <div id="ntHint">Press V to deploy</div>
+  </div>
+
+  <div id="killfeed"></div>
+  <div id="eventFeed"></div>
+
+  <div id="healthWrap">
+    <div id="hpNum">100<small>HP</small></div>
+    <div id="hpBar"><div id="hpFill"></div></div>
+  </div>
+
+  <div id="streakCol"></div>
+
+  <div id="slots">
+    <div class="slot on">1</div><div class="slot">2</div><div class="slot">3</div><div class="slot">4</div>
+  </div>
+
+  <div id="brWrap">
+    <div id="equip">
+      <div class="eq" id="eqLethal"><span class="ic">✸</span><span class="lb">Frag</span><span class="ct">1</span></div>
+      <div class="eq" id="eqTactical"><span class="ic">◎</span><span class="lb">Stun</span><span class="ct">2</span></div>
+    </div>
+    <div id="ammoWrap">
+      <div id="wpnRow"><span id="wpnIcon"></span><span id="wpnName">M4A1 Carbine</span></div>
+      <div id="ammoLine"><span id="ammoCur">30</span><span id="ammoRes">180</span></div>
+      <div id="fireStrip"><i></i><i></i><i></i><span id="fireMode">AUTO</span></div>
+      <div id="reloadHint">Press R to reload</div>
+    </div>
+  </div>
+
+  <div id="gameBtns">
+    <div class="gbtn" id="btnHudMute" title="Mute">&#128266;</div>
+    <div class="gbtn" id="btnHudPause" title="Pause">&#9208;</div>
+  </div>
+  <div id="pauseHint">Tab — Scoreboard &nbsp;·&nbsp; Esc — Pause &nbsp;·&nbsp; F — Perf</div>
+  <div id="perfHud"></div>
+
+  <!-- shown only while dead in a round mode -->
+  <div id="spectate">
+    <div id="specName">SPECTATING</div>
+    <div id="specHint">Click to switch operator</div>
+  </div>
+  <button id="skipRound">Skip round</button>
+</div>
+
+<div id="scope">
+  <div class="glass"></div>
+  <div class="rim"></div>
+  <div class="cross">
+    <i class="hz"></i><i class="vt"></i>
+  </div>
+</div>
+
+<div id="damageVig"></div>
+<div id="lowHp"></div>
+<div id="dmgDirs"></div>
+<div id="screenFlash"></div>
+
+<div id="nukeSeq">
+  <div id="nukeBars"></div>
+  <div class="warn">Tactical Nuke</div>
+  <div class="sub">Detonation Imminent — Take Cover</div>
+  <div id="nukeCount">5</div>
+</div>
+
+<!-- ════════ OVERLAYS ════════ -->
+<div class="overlay" id="death">
+  <h2>YOU DIED</h2>
+  <div id="deathRule"></div>
+  <div id="deathBy">—</div>
+  <div id="deathWpn"></div>
+  <div id="respawnWrap">
+    <div id="respawnNum">5</div>
+    <div id="respawnBarOuter"><div id="respawnBar"></div></div>
+    <div id="respawn">Respawning</div>
+  </div>
+</div>
+
+<div class="overlay" id="end">
+  <h1 id="endTitle">Victory</h1>
+  <div id="endSub">Team Deathmatch — Nuketown</div>
+  <div id="endStats">
+    <div><b id="esK">0</b><span>Kills</span></div>
+    <div><b id="esD">0</b><span>Deaths</span></div>
+    <div><b id="esR">0.0</b><span>K/D</span></div>
+    <div><b id="esH">0</b><span>Headshots</span></div>
+    <div><b id="esS">0</b><span>Best Streak</span></div>
+  </div>
+  <button class="menuBtn primary" id="btnAgain">Play Again</button>
+  <button class="menuBtn" id="btnMenu">Main Menu</button>
+</div>
+
+<div class="overlay" id="pause">
+  <h1 style="font-family:Teko,sans-serif;font-size:54px;letter-spacing:.2em;color:#fff">Paused</h1>
+  <button class="menuBtn primary" id="btnResume" style="margin-top:20px">Resume</button>
+  <button class="menuBtn" id="btnPauseControls">Controls</button>
+  <button class="menuBtn" id="btnQuit">Quit to Menu</button>
+</div>
+
+<div id="board">
+  <div class="bwrap">
+    <div class="bteam a"><h3 id="btA">Team Blue</h3><div id="rowsA"></div></div>
+    <div class="bteam b"><h3 id="btB">Team Red</h3><div id="rowsB"></div></div>
+  </div>
+</div>
+
+<script type="module" src="/js/game.c847eb1b01.js"></script>
+</body>
+</html>

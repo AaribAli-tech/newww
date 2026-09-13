@@ -1,0 +1,74 @@
+/* NUKETOWN — self-hosted fonts.
+ *
+ * The original build pulled Rajdhani / Teko / Barlow Condensed from Google Fonts,
+ * which meant two DNS lookups, a TLS handshake and a render-blocking stylesheet
+ * before the menu could paint. These nine latin-subset .woff2 files (140 KB total,
+ * immutable-cached) replace all of it. Subset + woff2 means no latin-ext or
+ * cyrillic payload is ever downloaded.
+ *
+ * Generated from the @fontsource packages; `npm run build` rewrites the URLs to
+ * content-hashed file names when it assembles public/.
+ */
+@font-face {
+  font-family: 'Rajdhani';
+  font-style: normal;
+  font-weight: 400;
+  font-display: swap;
+  src: url('rajdhani-400.woff2') format('woff2');
+}
+@font-face {
+  font-family: 'Rajdhani';
+  font-style: normal;
+  font-weight: 500;
+  font-display: swap;
+  src: url('rajdhani-500.woff2') format('woff2');
+}
+@font-face {
+  font-family: 'Rajdhani';
+  font-style: normal;
+  font-weight: 600;
+  font-display: swap;
+  src: url('rajdhani-600.woff2') format('woff2');
+}
+@font-face {
+  font-family: 'Rajdhani';
+  font-style: normal;
+  font-weight: 700;
+  font-display: swap;
+  src: url('rajdhani-700.woff2') format('woff2');
+}
+@font-face {
+  font-family: 'Teko';
+  font-style: normal;
+  font-weight: 500;
+  font-display: swap;
+  src: url('teko-500.woff2') format('woff2');
+}
+@font-face {
+  font-family: 'Teko';
+  font-style: normal;
+  font-weight: 600;
+  font-display: swap;
+  src: url('teko-600.woff2') format('woff2');
+}
+@font-face {
+  font-family: 'Teko';
+  font-style: normal;
+  font-weight: 700;
+  font-display: swap;
+  src: url('teko-700.woff2') format('woff2');
+}
+@font-face {
+  font-family: 'Barlow Condensed';
+  font-style: normal;
+  font-weight: 500;
+  font-display: swap;
+  src: url('barlow-condensed-500.woff2') format('woff2');
+}
+@font-face {
+  font-family: 'Barlow Condensed';
+  font-style: normal;
+  font-weight: 600;
+  font-display: swap;
+  src: url('barlow-condensed-600.woff2') format('woff2');
+}

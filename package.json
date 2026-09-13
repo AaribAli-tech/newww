@@ -1,0 +1,24 @@
+{
+  "name": "nuketown-web",
+  "version": "1.0.0",
+  "private": true,
+  "description": "NUKETOWN browser FPS — Vercel-deployable web build of the local 'Call of Duty Build' game.",
+  "type": "module",
+  "scripts": {
+    "build": "node scripts/build.mjs",
+    "optimize": "node scripts/optimize-assets.mjs",
+    "start": "node scripts/serve.mjs",
+    "dev": "node scripts/build.mjs --watch",
+    "verify": "node scripts/verify.mjs",
+    "og": "node scripts/make-og-image.mjs"
+  },
+  "devDependencies": {
+    "@gltf-transform/core": "^4.1.1",
+    "@gltf-transform/extensions": "^4.1.1",
+    "@gltf-transform/functions": "^4.1.1",
+    "esbuild": "^0.24.0",
+    "meshoptimizer": "^0.22.0",
+    "sharp": "^0.33.5",
+    "three": "0.164.1"
+  }
+}

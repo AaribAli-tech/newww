@@ -1,0 +1,141 @@
+{
+  "version": "03534be04a",
+  "builtAt": "2026-09-13T05:20:47.331Z",
+  "files": [
+    "js/game.c847eb1b01.js",
+    "css/styles.e59f31b48e.css",
+    "sw.js",
+    {
+      "file": "favicon.svg",
+      "bytes": 487
+    },
+    {
+      "file": "icons/icon-192.png",
+      "bytes": 5733
+    },
+    {
+      "file": "icons/icon-512.png",
+      "bytes": 31054
+    },
+    {
+      "file": "icons/apple-touch-icon.png",
+      "bytes": 5302
+    },
+    {
+      "file": "manifest.webmanifest",
+      "bytes": 704
+    },
+    {
+      "file": "assets/textures/asphalt.jpg",
+      "bytes": 182668
+    },
+    {
+      "file": "assets/textures/concrete.jpg",
+      "bytes": 190775
+    },
+    {
+      "file": "assets/textures/deck.jpg",
+      "bytes": 175140
+    },
+    {
+      "file": "assets/textures/grass.jpg",
+      "bytes": 334686
+    },
+    {
+      "file": "assets/textures/plaster.jpg",
+      "bytes": 19634
+    },
+    {
+      "file": "assets/textures/rust.jpg",
+      "bytes": 133648
+    },
+    {
+      "file": "assets/textures/sand.jpg",
+      "bytes": 125246
+    },
+    {
+      "file": "assets/textures/shingle.jpg",
+      "bytes": 237317
+    },
+    {
+      "file": "assets/textures/siding_teal.jpg",
+      "bytes": 62042
+    },
+    {
+      "file": "assets/textures/siding_yellow.jpg",
+      "bytes": 56567
+    },
+    {
+      "file": "assets/textures/stone.jpg",
+      "bytes": 211784
+    },
+    {
+      "file": "assets/textures/trim.jpg",
+      "bytes": 55038
+    },
+    {
+      "file": "assets/textures/woodfloor.jpg",
+      "bytes": 162251
+    },
+    {
+      "file": "assets/models/anim_crouch.glb",
+      "bytes": 37484
+    },
+    {
+      "file": "assets/models/anim_death.glb",
+      "bytes": 68160
+    },
+    {
+      "file": "assets/models/anim_idle.glb",
+      "bytes": 42096
+    },
+    {
+      "file": "assets/models/anim_run.glb",
+      "bytes": 30856
+    },
+    {
+      "file": "assets/models/anim_walk.glb",
+      "bytes": 64104
+    },
+    {
+      "file": "assets/models/hand_left.glb",
+      "bytes": 452456
+    },
+    {
+      "file": "assets/models/hand_right.glb",
+      "bytes": 430288
+    },
+    {
+      "file": "assets/models/manifest.json",
+      "bytes": 508
+    },
+    {
+      "file": "assets/models/soldier_blue.glb",
+      "bytes": 400500
+    },
+    {
+      "file": "assets/models/soldier_red.glb",
+      "bytes": 388484
+    },
+    {
+      "file": "assets/models/wpn_pistol.glb",
+      "bytes": 397880
+    },
+    {
+      "file": "assets/models/wpn_rifle.glb",
+      "bytes": 485004
+    },
+    {
+      "file": "assets/models/wpn_shotgun.glb",
+      "bytes": 529020
+    },
+    {
+      "file": "assets/models/wpn_smg.glb",
+      "bytes": 536080
+    },
+    {
+      "file": "assets/models/wpn_sniper.glb",
+      "bytes": 412856
+    }
+  ]
+}
