@@ -518,7 +518,9 @@ body.touch #healthWrap{transform:scale(.4);transform-origin:top left;top:12px;le
 /* the labelled PAUSE pill is ~90px wide, so the ammo readout ends short of it */
 body.touch #brWrap{transform:scale(.4);transform-origin:top right;top:12px;right:164px;bottom:auto}
 body.touch #killfeed{transform:scale(.62);transform-origin:top right;top:46px;right:10px}
-body.touch #nukeTrack{transform:translateX(-50%) scale(.66);transform-origin:top center;top:8px}
+/* under the score strip, which is also centred — on desktop they are 200px apart,
+   on a 400px-tall phone they would print over each other */
+body.touch #nukeTrack{transform:translateX(-50%) scale(.66);transform-origin:top center;top:70px}
 body.touch #eventFeed{transform:translateX(-50%) scale(.82)}
 body.touch #gameBtns{top:8px;right:8px;gap:8px}
 body.touch .gbtn{width:46px;height:46px;font-size:20px;border-radius:9px;background:rgba(4,6,9,.62)}

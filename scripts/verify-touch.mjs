@@ -84,6 +84,26 @@ check('control layer installed', detected.ui && detected.fire && detected.rotate
 check('keyboard/mode picker still available', await page.evaluate(
     () => getComputedStyle(document.getElementById('modePick')).display !== 'none'));
 
+// no two readouts may share pixels on a screen this small
+const overlaps = await page.evaluate(() => {
+    const ids = ['#miniWrap', '#healthWrap', '#brWrap', '#matchBar', '#gameBtns', '#killfeed', '#nukeTrack'];
+    const r = s => { const e = document.querySelector(s); return e ? e.getBoundingClientRect() : null; };
+    const boxes = ids.map(s => [s, r(s)]).filter(([, b]) => b && b.width > 2 && b.height > 2);
+    const out = [];
+    for (let i = 0; i < boxes.length; i++) for (let k = i + 1; k < boxes.length; k++) {
+        const [na, a] = boxes[i], [nb, b] = boxes[k];
+        const w = Math.min(a.right, b.right) - Math.max(a.left, b.left);
+        const h = Math.min(a.bottom, b.bottom) - Math.max(a.top, b.top);
+        if (w > 3 && h > 3) out.push(`${na} × ${nb} (${Math.round(w)}×${Math.round(h)}px)`);
+    }
+    // and everything must stay inside the viewport
+    const off = boxes.filter(([, b]) => b.right > innerWidth + 2 || b.bottom > innerHeight + 2 ||
+        b.left < -2 || b.top < -2).map(([n]) => n);
+    return { out, off };
+});
+check('no HUD blocks overlap each other on a phone', overlaps.out.length === 0, overlaps.out.join(', '));
+check('no HUD block runs off screen', overlaps.off.length === 0, overlaps.off.join(', '));
+
 // ── portrait gate ─────────────────────────────────────────────────────────────
 await page.setViewport(PORT);
 // viewport events are dispatched on the renderer's frame cadence — under a

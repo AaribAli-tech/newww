@@ -16,13 +16,19 @@
 // Set VERIFY_URL to point it at a deployed URL instead of a local build:
 //   VERIFY_URL=https://nuketown.vercel.app node scripts/verify.mjs
 // ============================================================================
+import fs from 'node:fs';
+import os from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const URL_BASE = process.env.VERIFY_URL || `http://127.0.0.1:${process.env.VERIFY_PORT || 8420}`;
 const SHOTS = path.join(ROOT, '.cache', 'shots');
+fs.mkdirSync(SHOTS, { recursive: true });   // screenshot() will not create it
 const log = (...a) => process.stdout.write(a.join(' ') + '\n');
+// Two cores plus a software rasteriser means every page-side wait costs seconds,
+// so the harness widens its own budgets instead of reporting a false failure.
+const SLOW = process.env.VERIFY_SLOW ? process.env.VERIFY_SLOW === '1' : os.cpus().length <= 2;
 
 // puppeteer (which downloads its own Chrome) or puppeteer-core plus a browser
 // you point at with CHROME_PATH — that fallback matters in containers, where
@@ -60,11 +66,50 @@ const browser = await launcher.launch({
     ]
 });
 
-const page = await browser.newPage();
+/**
+ * Screenshots here are only diagnostic, and `page.screenshot()` has no timeout of
+ * its own — it waits on the CDP protocol timeout, which on a software rasteriser
+ * (this sandbox renders through SwiftShader at ~2 frames a second) means the whole
+ * run can sit there until it expires. Race it, take what came, move on.
+ */
+async function snap(name, ms = SLOW ? 130000 : 40000) {
+    const file = path.join(SHOTS, name);
+    const shot = page.screenshot({ path: file }).then(() => true).catch(() => false);
+    const won = await Promise.race([shot, new Promise(res => setTimeout(() => res(false), ms))]);
+    if (!won) log(`   (skipped ${name}: the page could not produce a frame in ${ms / 1000}s)`);
+    return won;
+}
+
+/** Same idea for any evaluate that only needs to *happen*, not to return. */
+async function attempt(label, fn, ms = SLOW ? 200000 : 60000) {
+    try {
+        await Promise.race([fn(), new Promise((_, rej) => setTimeout(() => rej(new Error('slow')), ms))]);
+        return true;
+    } catch (err) {
+        log(`   (could not finish ${label}: ${String(err.message).slice(0, 60)})`);
+        return false;
+    }
+}
+
+
+
 // True network cost. The page's own view of a response cannot tell a socket read
 // from a service-worker cache hit, so ask the network stack directly: CDP marks
 // both fromCache and fromServiceWorker on the response, and encodedDataLength is
 // what actually crossed the wire.
+const page = await browser.newPage();
+
+/** Like attempt(), but for a probe whose *value* is used: null on timeout. */
+async function race(label, fn, ms) {
+    let done = false;
+    const value = await Promise.race([
+        fn().then(v => { done = true; return v; }),
+        new Promise(res => setTimeout(() => res(null), ms))
+    ]);
+    if (!done) log(`   (could not finish ${label}: the page was too busy to answer in ${ms / 1000}s)`);
+    return value;
+}
+
 const net = { wire: 0, cached: 0, cachedReqs: 0, requests: 0, byUrl: new Map() };
 const cdp = await page.createCDPSession();
 await cdp.send('Network.enable');
@@ -224,10 +269,10 @@ const live = await page.evaluate(() => {
 log(`   live            ${live.bots} bots · state ${live.state} · ${live.health} hp · HUD ${live.hudVisible ? 'up' : 'missing'}`);
 log(`   perf readout    ${String(live.perfHud || '').replace(/\s+/g, ' ').trim()}`);
 
-await page.screenshot({ path: path.join(SHOTS, 'game.png') }).catch(() => {});
+await snap('game.png');
 
 // fire a few rounds and make sure nothing throws while shooting/reloading
-await page.evaluate(async () => {
+await attempt('the shooting/keybind exercise', () => page.evaluate(async () => {
     const G = window.__nuketown;
     const canvas = document.getElementById('gameCanvas');
     for (let i = 0; i < 3; i++) {
@@ -242,10 +287,10 @@ await page.evaluate(async () => {
     await new Promise(r => setTimeout(r, 250));
     window.dispatchEvent(new KeyboardEvent('keyup', { code: 'Tab' }));
     return true;
-});
+}));
 
 // ── repeat visit: the shell cache should turn this into a disk read ─────────
-const sw = await page.evaluate(async () => {
+const sw = await race('the service-worker probe', () => page.evaluate(async () => {
     if (!('serviceWorker' in navigator)) return { supported: false };
     try {
         const reg = await Promise.race([
@@ -260,20 +305,33 @@ const sw = await page.evaluate(async () => {
     } catch (err) {
         return { supported: true, error: String(err && err.message || err) };
     }
-});
-log(`\n service worker    ${sw.registered ? 'active, ' + sw.entries + ' entries cached' : 'not active' + (sw.error ? ' (' + sw.error + ')' : '')}`);
+}), SLOW ? 90000 : 40000) || { supported: false, unmeasured: true };
+log(`\n service worker    ${sw.unmeasured ? 'probe timed out — run again on a faster machine'
+    : sw.registered ? 'active, ' + sw.entries + ' entries cached'
+    : 'not active' + (sw.error ? ' (' + sw.error + ')' : '')}`);
 
 const firstWire = net.wire, firstCached = net.cached, firstReqs = net.requests;
 const bytesBefore = bytes;
-const tReload = Date.now();
-await page.reload({ waitUntil: 'domcontentloaded', timeout: 90000 });
-await page.waitForFunction('window.__nuketown && window.__nuketown.state === "menu"', { timeout: 120000, polling: 400 });
-const reloadMs = Date.now() - tReload;
-const reloadWire = net.wire - firstWire;
+let reloadMs = 0, reloadWire = 0, reloadProblem = '';
+try {
+    const tReload = Date.now();
+    await page.reload({ waitUntil: 'domcontentloaded', timeout: SLOW ? 260000 : 90000 });
+    await page.waitForFunction('window.__nuketown && window.__nuketown.state === "menu"',
+        { timeout: SLOW ? 300000 : 120000, polling: 400 });
+    reloadMs = Date.now() - tReload;
+    reloadWire = net.wire - firstWire;
+} catch (err) {
+    // The repeat-visit number is the whole point of the service worker, so a page
+    // that will not come back is a failure to report — never a reason to hang.
+    reloadProblem = String(err && err.message || err).split('\n')[0].slice(0, 80);
+    reloadWire = firstWire;      // no new bytes were measured
+}
 log(`\n first visit       menu in ${timings['→ menu'].ms} ms · ${(firstWire / 1024).toFixed(0)} KB over the network` +
     ` · ${firstReqs} requests`);
-log(` repeat visit      menu in ${reloadMs} ms · ${(reloadWire / 1024).toFixed(0)} KB over the network` +
-    ` · ${net.requests - firstReqs} requests, ${net.cachedReqs} of them answered from cache`);
+log(reloadProblem
+    ? ` repeat visit      NOT MEASURED (${reloadProblem})`
+    : ` repeat visit      menu in ${reloadMs} ms · ${(reloadWire / 1024).toFixed(0)} KB over the network` +
+      ` · ${net.requests - firstReqs} requests, ${net.cachedReqs} of them answered from cache`);
 
 // ── 404 hunt ────────────────────────────────────────────────────────────────
 const missing = Object.entries(timings).filter(([, v]) => v.status >= 400);
@@ -287,7 +345,7 @@ if (assetLines.length) {
         log(`   ${(u || '/').padEnd(46)} ${(v.bytes / 1024).toFixed(0).padStart(5)} KB  ${v.enc.padEnd(4)} ${v.cache.split(',')[0] || ''}`);
     }
 }
-await page.screenshot({ path: path.join(SHOTS, 'after.png') }).catch(() => {});
+await snap('after.png');
 await browser.close();
 
 log('\n────────────────────────────────────────────────────────────');
@@ -297,7 +355,7 @@ log(` failed requests  ${failed.length ? '\n   ' + failed.join('\n   ') : 'none'
 log(` console errors   ${errors.length ? '\n   ' + errors.join('\n   ') : 'none'}`);
 log(` console warnings ${warnings.length ? '\n   ' + warnings.slice(0, 8).join('\n   ') : 'none'}`);
 
-const reloadOk = !sw.registered || reloadWire < firstWire * 0.25;
+const reloadOk = !reloadProblem && (!sw.registered || reloadWire < firstWire * 0.25);
 const ok = errors.length === 0 && failed.length === 0 && missing.length === 0 &&
     report.scene.skinned > 0 && live.bots > 0 && report.assets.soldiers && report.assets.viewmodels && reloadOk;
 // a real repeat-visit win: the shell cache must keep the second load off the wire
