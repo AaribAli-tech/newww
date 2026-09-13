@@ -519,3 +519,35 @@ canvas#gameCanvas{display:block;width:100vw;height:100vh}
 @media (max-height:420px){ #notMobile .nmKeys{display:none} }
 .menuBtn:disabled{opacity:.45;cursor:not-allowed;letter-spacing:.2em}
 .menuBtn:disabled:hover{background:rgba(255,255,255,.03);border-color:rgba(255,255,255,.18);color:var(--ink)}
+/* ══════════════════════ KILL FEEDBACK ══════════════════════
+   Two different counters, deliberately shown apart: a CHAIN (kills seconds apart
+   → DOUBLE / TRIPLE / MULTI) and a STREAK (kills since you last died → the name
+   and the rewards). See medals.js. */
+#medals{position:absolute;left:50%;top:34%;transform:translateX(-50%);display:flex;flex-direction:column;
+  align-items:center;gap:1px;pointer-events:none;z-index:4}
+.medal{font-family:'Teko',sans-serif;font-size:34px;line-height:.95;letter-spacing:.17em;
+  text-transform:uppercase;text-shadow:0 2px 14px rgba(0,0,0,.9),0 0 26px rgba(0,0,0,.55);
+  opacity:0;transform:translateY(9px) scale(.82);white-space:nowrap;
+  animation:medalIn .16s cubic-bezier(.2,1.6,.4,1) forwards,medalOut .55s ease-in 1.1s forwards}
+.medal.base{font-size:21px;letter-spacing:.3em;color:rgba(255,255,255,.78)}
+.medal small{display:block;font-family:'Barlow Condensed',sans-serif;font-size:10px;letter-spacing:.3em;
+  opacity:.75;margin-top:1px}
+@keyframes medalIn{to{opacity:1;transform:none}}
+@keyframes medalOut{to{opacity:0;transform:translateY(-7px)}}
+#streakRun{position:absolute;left:50%;bottom:70px;transform:translateX(-50%);display:none;align-items:center;
+  gap:9px;padding:3px 11px 5px;border:1px solid rgba(255,255,255,.12);border-radius:3px;
+  background:rgba(4,6,9,.52);pointer-events:none;z-index:3}
+#streakRun.on{display:flex}
+#streakRun b{font-family:'Teko',sans-serif;font-size:22px;line-height:1;color:var(--accent)}
+#streakRun span{font-family:'Barlow Condensed',sans-serif;font-size:10px;letter-spacing:.26em;
+  color:rgba(255,255,255,.82)}
+#streakRun i{display:block;width:52px;height:2px;background:rgba(255,255,255,.5);
+  transform-origin:left center;transform:scaleX(0);transition:transform .25s ease-out}
+@media (prefers-reduced-motion: reduce){
+  .medal{animation:none;opacity:1;transform:none}
+}
+/* one table for modes with no teams (Free For All, Gun Game) */
+#board.solo .bwrap{width:min(660px,94vw)}   /* .bwrap is flex, so the one column takes the row */
+#board.solo .bteam.b{display:none}
+#board .tg{font-family:'Barlow Condensed',sans-serif;font-size:11px;letter-spacing:.14em;
+  color:var(--accent);text-align:right}

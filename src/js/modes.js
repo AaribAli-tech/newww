@@ -9,17 +9,21 @@
 // Every Mode also exposes the old TeamDeathmatch surface — teamAScore,
 // teamBScore, timeRemaining, matchOver, winner, addKill(), nukeWin(), reset() —
 // because killstreaks.js and the HUD still read a game mode that way.
+//
+// A kill arrives through onKill(killer, victim, weapon, head) and nowhere else:
+// main reports it once, and the mode decides what it is worth — a team tally, a
+// round, a rung, a match won at 200 kills, or nothing at all.
 // ============================================================================
 import { TeamDeathmatch, countAlive } from './gamemode.js';
 import * as W from './weapons.js';
 import { SPAWN_A, SPAWN_B } from './map.js';
 import { TEAM_A, TEAM_B } from './utils.js';
 
-// Gun Game was cut. The GunGame class below is left in place and still builds,
-// but it is not offered in the menu.
 export const MODES = [
-    { id: 'tdm', name: 'Team Deathmatch', desc: 'First to 75 kills. Respawns on.' },
-    { id: 'ctl', name: 'Round Control',   desc: '3v3 · one life per round · first to 3 rounds.' }
+    { id: 'tdm', name: 'Team Deathmatch', desc: '5v5 · first to 75 kills · respawns on.' },
+    { id: 'ctl', name: 'Round Control',   desc: '3v3 · one life per round · first to 3 rounds.' },
+    { id: 'ffa', name: 'Free For All',    desc: '8 solos · no teams · first to 200 kills, anyone can win.' },
+    { id: 'gun', name: 'Gun Game',        desc: '4 guns · every kill moves you up a gun · finish the ladder first.' }
 ];
 
 // ── tables ──────────────────────────────────────────────────────────────────
@@ -148,6 +152,24 @@ class BaseMode {
     canRespawn(entity) { void entity; return true; }
 
     isFrozen() { return false; }
+
+    /**
+     * Team modes leave these alone: the scoreboard is two squads and the HUD
+     * clock. A mode with no teams sets both, and the HUD/board read them instead
+     * of inventing a fake Team Blue / Team Red split for eight solos.
+     */
+    get noTeams() { return false; }
+
+    /** @returns {{title: string, columns: string[], rows: Array<object>}|null} */
+    standings() { return null; }
+
+    /** Everyone in the roster, player first, for modes that tally per person. */
+    *entities() {
+        const p = this.player;
+        if (p) yield p;
+        const bots = this.bots();
+        for (let i = 0; i < bots.length; i++) if (bots[i]) yield bots[i];
+    }
 
     update(dt) {
         this.scoring.update(dt);
@@ -452,7 +474,146 @@ class RoundControl extends BaseMode {
     }
 }
 
-// ── 2.3 Gun Game ────────────────────────────────────────────────────────────
+// ── 2.3 Free For All ────────────────────────────────────────────────────────
+/**
+ * Eight soldiers, no teams, first to `KILL_TARGET` kills.
+ *
+ * There are only two team ids in this engine, so "no teams" is not expressed by
+ * inventing eight of them — the bots keep their blue/red coat for the sake of the
+ * rigs and the minimap, and `allHostile` on ai.js does the actual work: every
+ * live entity is fair game, including whoever used to be on your side. That is
+ * what makes the mode read right: the bots grind each other just as hard as they
+ * grind you, so the leaderboard is a race, not a execution queue.
+ *
+ * No killstreaks, deliberately. The nuke ends a match on the spot, and a streak
+ * that can be banked from other people's kills would hand a 15-kill win to
+ * whoever hid longest — the 200 the score is asking for would never be reached.
+ */
+const KILL_TARGET = 200;
+
+class FreeForAll extends BaseMode {
+    constructor(meta, ctx) {
+        super(meta, ctx, { teamSize: 4, scoreLimit: Infinity, timeLimit: Infinity, usesKillstreaks: false });
+        // Every reward off, not just hidden — see the note above.
+        this.disabledStreaks = new Set(['uav', 'air', 'nuke']);
+        this.target = KILL_TARGET;
+        this.champion = '';
+        this._capKey = null;
+        this.reset();
+    }
+
+    reset() {
+        super.reset();
+        this.champion = '';
+        this._capKey = null;
+        for (const e of this.entities()) e._ffaPush = undefined;
+    }
+
+    get noTeams() { return true; }
+
+    onMatchStart() {
+        this.reset();
+        this.banner('FREE FOR ALL', '#FF7A18', `First to ${this.target} kills · everybody is the enemy`);
+    }
+
+    /** Nothing short of reaching the target ends this match. */
+    nukeWin() { }
+
+    onKill(killer, victim) {
+        void victim;
+        if (!killer || this.isOver()) return;
+        const mine = this.isPlayer(killer);
+        const killed = mine ? (this.player.kills | 0) : (killer.kills | 0);
+        if (killed >= this.target) {
+            this.champion = killer.name || 'Operator';
+            // The end screen reads a team, so map the winner onto the player's
+            // side rather than teach hud.showEnd about a mode with no teams.
+            this.scoring.forceEnd(mine ? TEAM_A : TEAM_B, `${this.champion} reached ${this.target}`);
+            this.banner(mine ? 'MATCH WON' : 'MATCH LOST',
+                mine ? '#5AD469' : '#FF4D4D', `${this.champion} · ${this.target} kills`);
+        }
+    }
+
+    /**
+     * Kill counts arrive from main's own bookkeeping, so the round-by-round
+     * reconcile only has to make sure each soldier plays without a team.
+     */
+    _onSpawn(bot) {
+        this._solofy(bot);
+        super._onSpawn(bot);
+    }
+
+    _solofy(bot) {
+        if (!bot || bot.allHostile) return;
+        bot.allHostile = true;
+        // Half of them push one way, half the other, so eight solos spread down
+        // the street instead of all converging on the same corner house.
+        if (!bot._ffaPush) {
+            bot._ffaPush = this._pushFlip = -(this._pushFlip || 1);
+            bot.pushDir = bot._ffaPush;
+        }
+        // Both spawn clusters, or they would all spawn on one side of the map.
+        const both = [...(SPAWN_A && SPAWN_A.length ? SPAWN_A : FALLBACK_A),
+            ...(SPAWN_B && SPAWN_B.length ? SPAWN_B : FALLBACK_B)];
+        bot.spawnPoints = both;
+    }
+
+    update(dt) {
+        this.scoring.update(dt);
+        this._reconcile();
+        // Bots exist before the first reconcile can see them, so coat them at
+        // least once per frame until they are all marked. Cheap: a length check.
+        if (this._marked !== this.bots().length) this._markAll();
+    }
+
+    _markAll() {
+        const bots = this.bots();
+        for (let i = 0; i < bots.length; i++) this._solofy(bots[i]);
+        this._marked = bots.length;
+    }
+
+    standings() {
+        const rows = [];
+        for (const e of this.entities()) {
+            rows.push({
+                name: this.isPlayer(e) ? 'You' : e.name,
+                k: e.kills | 0, d: e.deaths | 0, s: e.score | 0,
+                me: this.isPlayer(e),
+                tag: `${Math.min(e.kills | 0, this.target)}/${this.target}`
+            });
+        }
+        rows.sort((a, b) => b.k - a.k || a.d - b.d);
+        return { title: `FREE FOR ALL · first to ${this.target}`, columns: ['Operator', 'Kills', 'Dead', 'Score'], rows };
+    }
+
+    hudState() {
+        const h = this._hud;
+        const me = this.player ? (this.player.kills | 0) : 0;
+        let lead = 0;
+        for (const e of this.bots()) if (e && (e.kills | 0) > lead) lead = e.kills | 0;
+        const key = me * 1024 + lead;
+        if (key !== this._capKey) {
+            this._capKey = key;
+            h.primary = `ME ${me} / ${this.target}`;
+            h.secondary = lead >= me ? `LEADER ${lead} · THEY ARE AHEAD` : `BEST RIVAL ${lead} · ${this.target - me} TO GO`;
+        }
+        return h;
+    }
+
+    result() {
+        const r = this._result;
+        const me = this.player ? this.player.kills | 0 : 0;
+        const best = Math.max(me, ...[...this.bots()].filter(Boolean).map(b => b.kills | 0));
+        r.won = me > 0 && me >= best && this.scoring.winner === TEAM_A;
+        r.title = r.won ? 'VICTORY' : 'DEFEAT';
+        r.subtitle = this.champion
+            ? `${this.champion} · ${this.target} kills`
+            : `You ${me} · best rival ${best} · first to ${this.target}`;
+        return r;
+    }
+}
+
+// ── 2.4 Gun Game ────────────────────────────────────────────────────────────
 /**
  * One kill advances the killer one rung. The ladder index lives on the entity
  * itself rather than in a Map keyed by entities, which would outlive them.
@@ -460,6 +621,10 @@ class RoundControl extends BaseMode {
 class GunGame extends BaseMode {
     constructor(meta, ctx) {
         super(meta, ctx, { teamSize: 5, scoreLimit: Infinity, timeLimit: Infinity, usesKillstreaks: false });
+        // Rewards are off in both senses — hidden, and unusable by key. A nuke
+        // would clear the whole enemy team at once, which in this mode is five
+        // free rungs, and the match ends on a ladder, not on a streak.
+        this.disabledStreaks = new Set(['uav', 'air', 'nuke']);
         this.rungs = LADDER.length;
         this.reset();
     }
@@ -481,8 +646,24 @@ class GunGame extends BaseMode {
 
     onMatchStart() {
         this.reset();
-        this.banner('GUN GAME', '#FFC24A', `Run all ${this.rungs} weapons`);
+        this.banner('GUN GAME', '#FFC24A', `Run all ${this.rungs} weapons · every kill moves you up one`);
         this._equipPlayer(LADDER[0]);
+    }
+
+    /**
+     * Ten players on two teams would mean the four blues could not shoot each
+     * other, so half the ladder would be parked in a corner. Everyone is hostile,
+     * which is also what makes "the enemy should do that too" readable: the bots
+     * farm each other to climb, exactly like you do.
+     */
+    _onSpawn(bot) {
+        if (bot && !bot.allHostile) {
+            bot.allHostile = true;
+            const both = [...(SPAWN_A && SPAWN_A.length ? SPAWN_A : FALLBACK_A),
+                ...(SPAWN_B && SPAWN_B.length ? SPAWN_B : FALLBACK_B)];
+            bot.spawnPoints = both;
+        }
+        super._onSpawn(bot);
     }
 
     /** Killstreaks are off, so a nuke can never be called. */
@@ -496,8 +677,9 @@ class GunGame extends BaseMode {
     onKill(killer, victim, weapon, isHeadshot) {
         void weapon; void isHeadshot;
         if (!killer || this.isOver()) return;
-        // Team kills exist only through a killstreak, and those are disabled.
-        if (victim && victim.team === killer.team && victim !== killer) return;
+        // In a team mode a friendly kill must not advance the ladder. There are no
+        // teams here, so everyone is a fair rung — that is the whole mode.
+        if (!this.noTeams && victim && victim.team === killer.team && victim !== killer) return;
         this.scoring.addKill(killer.team === TEAM_B ? TEAM_B : TEAM_A);
 
         const mine = this.isPlayer(killer);
@@ -534,11 +716,15 @@ class GunGame extends BaseMode {
 
     result() {
         const r = this._result;
+        const mine = `you reached ${this.rung + 1}/${this.rungs}`;
         r.won = this.scoring.winner === TEAM_A;
         r.title = r.won ? 'VICTORY' : 'DEFEAT';
-        r.subtitle = r.won
+        // Only say somebody finished the ladder when somebody else did — a win of
+        // your own should not read like a report about someone else.
+        const clean = r.won && (!this.champion || this.champion === 'You');
+        r.subtitle = clean
             ? `All ${this.rungs} weapons`
-            : `${this.champion || 'Enemy'} finished the ladder · you reached ${this.rung + 1}/${this.rungs}`;
+            : `${this.champion ? `${this.champion} finished the ladder` : 'Ladder not finished'} · ${mine}`;
         return r;
     }
 
@@ -551,6 +737,29 @@ class GunGame extends BaseMode {
             h.secondary = r + 1 < LADDER.length ? `NEXT: ${this._nameAt(r + 1)}` : 'FINAL WEAPON';
         }
         return h;
+    }
+
+    get noTeams() { return true; }
+
+    /**
+     * Everyone is against everyone here too, so the board is one table — with the
+     * rung each rival is on, which is the only way to see the ladder being climbed
+     * around you.
+     */
+    standings() {
+        const rows = [];
+        for (const e of this.entities()) {
+            const rung = Math.min(e._ggRung | 0, this.rungs - 1);
+            const d = DEFS[LADDER[rung]];
+            rows.push({
+                name: this.isPlayer(e) ? 'You' : e.name,
+                k: e.kills | 0, d: e.deaths | 0, s: e.score | 0,
+                me: this.isPlayer(e),
+                tag: `${rung + 1}/${this.rungs} ${d ? d.short : ''}`.trim()
+            });
+        }
+        rows.sort((a, b) => (parseInt(b.tag, 10) || 0) - (parseInt(a.tag, 10) || 0) || b.k - a.k);
+        return { title: `GUN GAME · ${this.rungs} weapons`, columns: ['Operator', 'Kills', 'Dead', 'Score'], rows };
     }
 
     // Bots re-roll a weapon whenever ai.js respawns them — put them back on
@@ -592,6 +801,7 @@ export function createMode(id, ctx) {
     switch (meta.id) {
         case 'ctl': return new RoundControl(meta, ctx);
         case 'gun': return new GunGame(meta, ctx);
+        case 'ffa': return new FreeForAll(meta, ctx);
         default:    return new TeamDeathmatchMode(meta, ctx);
     }
 }

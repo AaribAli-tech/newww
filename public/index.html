@@ -5,8 +5,8 @@
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>NUKETOWN</title>
 
-<link rel="stylesheet" href="/css/styles.e1f16158ca.css">
-<link rel="preload" as="script" crossorigin href="/js/game.8bab6380d4.js">
+<link rel="stylesheet" href="/css/styles.5d0ed77795.css">
+<link rel="preload" as="script" crossorigin href="/js/game.a08afda494.js">
 <link rel="preload" as="font" type="font/woff2" crossorigin href="/fonts/rajdhani-400.759a9000e4.woff2">
 <link rel="preload" as="font" type="font/woff2" crossorigin href="/fonts/teko-700.a57552efb2.woff2">
 <link rel="icon" href="/favicon.svg" type="image/svg+xml">
@@ -129,6 +129,13 @@
   <div id="killfeed"></div>
   <div id="eventFeed"></div>
 
+  <!-- kill confirmation stack, centred above the crosshair -->
+  <div id="medals"></div>
+
+  <!-- killstreak progression: how many in a row, its name, and the fill toward
+       the next name. Only ever written on a kill or a death. -->
+  <div id="streakRun"></div>
+
   <div id="healthWrap">
     <div id="hpNum">100<small>HP</small></div>
     <div id="hpBar"><div id="hpFill"></div></div>
@@ -246,6 +253,6 @@
   </div>
 </div>
 
-<script type="module" src="/js/game.8bab6380d4.js"></script>
+<script type="module" src="/js/game.a08afda494.js"></script>
 </body>
 </html>

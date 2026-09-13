@@ -12,7 +12,8 @@
     "verify": "node scripts/verify.mjs",
     "og": "node scripts/make-og-image.mjs",
     "zip": "node scripts/make-deploy-zip.mjs",
-    "check": "node scripts/vercel-build.mjs"
+    "check": "node scripts/vercel-build.mjs",
+    "test:rules": "node scripts/test-rules.mjs"
   },
   "devDependencies": {
     "@gltf-transform/core": "^4.1.1",

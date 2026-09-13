@@ -27,8 +27,10 @@ function txt(el, v) {
 // modes.js may not exist yet in a partial build, so it is pulled in
 // dynamically and the catalogue falls back to the spec list.
 const FALLBACK_MODES = [
-    { id: 'tdm', name: 'Team Deathmatch', desc: 'First to 75 kills. Respawns on.' },
-    { id: 'ctl', name: 'Round Control', desc: '3v3 · one life per round · first to 3 rounds.' }
+    { id: 'tdm', name: 'Team Deathmatch', desc: '5v5 · first to 75 kills · respawns on.' },
+    { id: 'ctl', name: 'Round Control', desc: '3v3 · one life per round · first to 3 rounds.' },
+    { id: 'ffa', name: 'Free For All', desc: '8 solos · no teams · first to 200 kills, anyone can win.' },
+    { id: 'gun', name: 'Gun Game', desc: '4 guns · every kill moves you up a gun · finish the ladder first.' }
 ];
 let modeList = FALLBACK_MODES;
 let modeId = FALLBACK_MODES[0].id;
@@ -127,6 +129,8 @@ export class HUD {
             mini: $('miniCanvas'), miniMark: $('miniMark'), uavTag: $('uavTag'),
             hpNum: $('hpNum'), hpFill: $('hpFill'),
             streakCol: $('streakCol'),
+            medals: $('medals'),
+            streakRun: $('streakRun'),
             wpnName: $('wpnName'), wpnIcon: $('wpnIcon'),
             ammoCur: $('ammoCur'), ammoRes: $('ammoRes'),
             fireMode: $('fireMode'), fireStrip: $('fireStrip'), reloadHint: $('reloadHint'),
@@ -673,6 +677,51 @@ export class HUD {
         while (this.el.killfeed.children.length > 6) this.el.killfeed.firstChild.remove();
     }
 
+    /**
+     * The kill confirmation stack — KILL / HEADSHOT / DOUBLE KILL / TRIPLE KILL /
+     * MULTI KILL — centred just above the crosshair and revealed one at a time,
+     * ~110 ms apart, so a triple lands as a beat rather than a wall of text.
+     *
+     * Each entry removes itself, so there is nothing to tick per frame and no
+     * queue to keep in sync with the game.
+     */
+    medals(list) {
+        const host = this.el.medals;
+        if (!host || !list || !list.length) return;
+        for (let i = 0; i < list.length; i++) {
+            const m = list[i];
+            const d = document.createElement('div');
+            d.className = 'medal' + (m.id === 'kill' ? ' base' : '');
+            d.style.color = m.tone || '#fff';
+            d.style.animationDelay = `${(i * 0.11).toFixed(2)}s, ${(1.05 + i * 0.11).toFixed(2)}s`;
+            d.innerHTML = m.label + (m.sub ? `<small>${m.sub}</small>` : '');
+            host.appendChild(d);
+            setTimeout(() => d.remove(), 1600 + i * 110);
+            while (host.children.length > 5) host.firstChild.remove();
+        }
+    }
+
+    clearMedals() {
+        const host = this.el.medals;
+        if (host) host.innerHTML = '';
+    }
+
+    /**
+     * The streak strip: how many in a row, what that is called, and how far to
+     * the next name. Called on kills and on death — never from the frame loop.
+     */
+    streakRun(streak, label, progress) {
+        const host = this.el.streakRun;
+        if (!host) return;
+        if (!streak || streak < 2) { this._streakShown = -1; host.classList.remove('on'); return; }
+        if (this._streakShown === streak) return;
+        this._streakShown = streak;
+        const p = Math.max(0, Math.min(1, progress || 0));
+        host.innerHTML = `<b>&times;${streak}</b><span>${label || 'KILL STREAK'}</span>` +
+            `<i style="transform:scaleX(${p.toFixed(3)})"></i>`;
+        host.classList.add('on');
+    }
+
     banner(title, color, sub) {
         const e = document.createElement('div');
         e.className = 'evt';
@@ -786,9 +835,31 @@ export class HUD {
 
     hideEnd() { this.el.end.classList.remove('on'); }
 
-    scoreboard(open, player, bots, teamA, teamB) {
+    /**
+     * Team modes get two squads side by side. Free For All and Gun Game pass a
+     * `mode` with no teams, and get one sorted table instead — with the tag the
+     * mode supplies (kills to the target, or the rung of the ladder).
+     */
+    scoreboard(open, player, bots, teamA, teamB, mode) {
         this.el.board.classList.toggle('on', open);
         if (!open) return;
+
+        const solo = mode && mode.standings && mode.noTeams ? mode.standings() : null;
+        if (solo) {
+            this.el.board.classList.toggle('solo', true);
+            this.el.btA.textContent = solo.title;
+            this.el.btB.textContent = '';
+            let html = `<div class="brow hd"><span>${solo.columns[0]}</span><span>${solo.columns[1]}</span>` +
+                `<span>${solo.columns[2]}</span><span>${solo.columns[3]}</span><span></span></div>`;
+            for (const r of solo.rows) {
+                html += `<div class="brow${r.me ? ' me' : ''}"><span>${r.name}</span><span>${r.k}</span>` +
+                    `<span>${r.d}</span><span>${r.s}</span><span class="tg">${r.tag || ''}</span></div>`;
+            }
+            this.el.rowsA.innerHTML = html;
+            this.el.rowsB.innerHTML = '';
+            return;
+        }
+        this.el.board.classList.toggle('solo', false);
         this.el.btA.textContent = `Team Blue — ${teamA}`;
         this.el.btB.textContent = `Team Red — ${teamB}`;
         const build = (list, host) => {

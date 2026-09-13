@@ -142,24 +142,19 @@ export const WEAPON_DEFS = [
 
 export const WEAPON_TYPES = WEAPON_DEFS.map(d => d.type);
 
-// Gun Game order: indices into WEAPON_DEFS, weakest first.  It is an order, not
-// a slice — the four Team Deathmatch weapons keep indices 0-3 and are woven in.
+// Gun Game order: the four guns this game is actually played with, one rung each
+// — four kills wins it. The order is a difficulty curve rather than a power
+// curve: you start on the rifle you know, drop to the SMG you have to close on,
+// take the shotgun to a knife fight, and finish on the bolt-action sniper, so
+// the last kill of a match is the hardest shot in the game.
+//
+// It is deliberately short. The fifteen-gun version made a match a grind and put
+// a 165-damage BARRETT in front of a player who had just earned it.
 export const GUN_GAME_LADDER = [
-    4,   // M9 SIDEARM
-    5,   // SKORPION
-    6,   // UZI
-    1,   // MP5
-    7,   // P90
     0,   // M4A1 CARBINE
-    10,  // RPK LIGHT MG
-    8,   // AK-47
-    9,   // SCAR-H
-    11,  // MODEL 680
+    1,   // MP5
     3,   // SPAS-12
-    12,  // AA-12
-    13,  // DRAGUNOV
-    2,   // R700 SNIPER
-    14   // BARRETT .50
+    2    // R700 SNIPER — win it with one clean shot
 ];
 
 // The weapons bots are meant to spawn with. ai.js still rolls across the whole

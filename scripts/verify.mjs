@@ -301,6 +301,93 @@ await attempt('the shooting/keybind exercise', () => page.evaluate(async () => {
     return true;
 }));
 
+// ── what a kill does, and the two teamless modes ────────────────────────────
+// The headless rules test (npm run test:rules) covers the arithmetic. This covers
+// the parts that only exist in a running page: the medal stack, the streak strip,
+// and the fact that a *player* kill reaches the mode at all — which is the bug
+// that would have shipped Gun Game unwinnable and Free For All unwinnable-by-you.
+const kills = await race('the kill-feedback checks', () => page.evaluate(async () => {
+    const G = window.__nuketown;
+    const txt = s => ((document.querySelector(s) || {}).textContent || '').replace(/\s+/g, ' ').trim();
+    const p = G.player;
+    const out = { before: { kills: p.kills, streak: p.killStreak } };
+
+    // three kills inside the chain window: KILL, then DOUBLE KILL, then TRIPLE +
+    // HEADSHOT. Nothing per-frame here — the DOM is written once per kill.
+    G.debugKill(false); G.debugKill(false); G.debugKill(true);
+    out.medals = [...document.querySelectorAll('#medals .medal')]
+        .map(e => e.textContent.replace(/\s+/g, ' ').trim());
+    out.feedRows = document.querySelectorAll('#killfeed .kf').length;
+    out.streakOn = document.getElementById('streakRun').classList.contains('on');
+    out.streakText = txt('#streakRun');
+    out.kills = p.kills; out.streak = p.killStreak;
+    out.score = p.score;
+
+    // Free For All: no teams, every soldier hostile, rewards off, 200 is the bar
+    G.setState('menu');
+    document.querySelector('#modePick .mode[data-id=\"ffa\"]').click();
+    await G.startMatch();
+    for (let i = 0; i < 4; i++) await new Promise(r => requestAnimationFrame(r));
+    const ffa = G.gamemode;
+    out.ffa = {
+        name: ffa.name,
+        noTeams: ffa.noTeams === true,
+        target: ffa.target,
+        allBotsHostile: G.bots.every(b => b.allHostile === true),
+        bothSpawnHalves: G.bots.every(b => (b.spawnPoints || []).length > 8),
+        streakColHidden: document.getElementById('streakCol').classList.contains('hidden'),
+        hud: txt('#timer'),
+        state: G.state,
+        killfeedWorks: (() => { const n = document.querySelectorAll('#killfeed .kf').length; G.debugKill(false);
+            return document.querySelectorAll('#killfeed .kf').length > n; })(),
+        // a player kill must move the *mode*, not just the scoreboard
+        scoreMoved: (() => { const before = G.player.kills; G.debugKill(false); return G.player.kills > before; })()
+    };
+
+    // Gun Game: four rungs, and the kill you just scored swaps your gun
+    G.setState('menu');
+    document.querySelector('#modePick .mode[data-id=\"gun\"]').click();
+    await G.startMatch();
+    for (let i = 0; i < 4; i++) await new Promise(r => requestAnimationFrame(r));
+    const gg = G.gamemode;
+    const gunBefore = p.current, rungBefore = p._ggRung | 0;
+    G.debugKill(false);
+    for (let i = 0; i < 6; i++) gg.update(1 / 60);        // the switch is applied by the mode
+    out.gun = {
+        name: gg.name, rungs: gg.rungs,
+        hud: txt('#timer'), next: txt('#modeLine'),
+        rungBefore, rungAfter: p._ggRung | 0,
+        gunBefore, gunAfter: p.current,
+        botsClimbToo: G.bots.some(b => (b._ggRung | 0) >= 0 && b.weaponIndex >= 0),
+        state: G.state
+    };
+
+    // back to the mode the run started in, so the numbers below are comparable
+    G.setState('menu');
+    document.querySelector('#modePick .mode[data-id=\"tdm\"]').click();
+    await G.startMatch();
+    return out;
+}), SLOW ? 260000 : 120000) || { error: 'not measured' };
+
+if (kills.error) {
+    log(`\n kills/modes       could not be measured (${kills.error})`);
+} else {
+    log(`\n kill feedback     ${kills.medals.length ? kills.medals.join(' + ') : 'no medals rendered'}` +
+        ` · feed ${kills.feedRows} row(s) · streak ${kills.streakText || 'off'}`);
+    log(` free for all      ${kills.ffa.name} · ${kills.ffa.target} kills · hostile to all: ` +
+        `${kills.ffa.allBotsHostile} · streaks hidden: ${kills.ffa.streakColHidden} · ${kills.ffa.hud}`);
+    log(` gun game          ${kills.gun.rungs} rungs · your kill moved rung ` +
+        `${kills.gun.rungBefore + 1} → ${kills.gun.rungAfter + 1} · weapon ${kills.gun.gunBefore} → ${kills.gun.gunAfter}`);
+}
+const MEDALS = ['KILL', 'DOUBLE KILL', 'TRIPLE KILL', 'HEADSHOT'];
+const killsOk = !kills.error &&
+    kills.medals.length >= 3 && MEDALS.every(m => kills.medals.some(x => x.includes(m))) &&
+    kills.feedRows >= 3 && kills.streakOn && kills.streak === kills.before.streak + 3 &&
+    kills.ffa.noTeams === true && kills.ffa.target === 200 && kills.ffa.allBotsHostile === true &&
+    kills.ffa.streakColHidden === true && kills.ffa.state === 'playing' && kills.ffa.scoreMoved === true &&
+    kills.gun.rungs === 4 && kills.gun.rungAfter === kills.gun.rungBefore + 1 &&
+    kills.gun.gunAfter !== kills.gun.gunBefore && kills.gun.state === 'playing';
+
 // ── spectating a teammate must be a third-person shot ───────────────────────
 // The bug this catches: the spectator camera used to be placed on the teammate's
 // own eye line — inside their head mesh — so a dead player in Round Control saw
@@ -423,11 +510,11 @@ log(` console warnings ${warnings.length ? '\n   ' + warnings.slice(0, 8).join('
 const reloadOk = !reloadProblem && (!sw.registered || reloadWire < firstWire * 0.25);
 const ok = errors.length === 0 && failed.length === 0 && missing.length === 0 &&
     report.scene.skinned > 0 && live.bots > 0 && report.assets.soldiers && report.assets.viewmodels &&
-    reloadOk && specOk;
+    reloadOk && specOk && killsOk;
 // a real repeat-visit win: the shell cache must keep the second load off the wire
 if (sw.registered && firstWire > 0 && reloadWire > firstWire * 0.25) {
     log('   note: the repeat visit still pulled a sizeable share from the network');
 }
 const perfOk = perf.calls > 0 && report.scene.triangles > 10000;
-log(`\n ${ok && perfOk ? '✓ PASS — the web build boots, loads its GLB assets and plays' : '✗ CHECK — see the lists above'}\n`);
+log(`\n ${ok && perfOk ? '✓ PASS — boots, loads its GLB assets, plays, and a kill does what the mode says' : '✗ CHECK — see the lists above'}\n`);
 process.exit(ok ? 0 : 1);

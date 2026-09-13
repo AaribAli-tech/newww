@@ -85,6 +85,11 @@ export class Bot {
         this.events = [];
     }
 
+    /** Which weapons a respawn may roll from. Gun Game pins this to its ladder. */
+    setWeaponPool(list) {
+        this.weaponPool = Array.isArray(list) && list.length ? list : null;
+    }
+
     setWeapon(i) {
         this.weaponIndex = i;
         this.weapon = WEAPON_DEFS[i];
@@ -97,7 +102,11 @@ export class Bot {
 
     // ── lifecycle ───────────────────────────────────────────────────────────
     spawn(pos) {
-        const sp = pos || randElement(this.team === TEAM_A ? SPAWN_A : SPAWN_B);
+        // A mode may hand this soldier its own spawn list (Free For All spreads
+        // everyone across both clusters so eight solos do not stack in one lane).
+        const list = this.spawnPoints && this.spawnPoints.length
+            ? this.spawnPoints : (this.team === TEAM_A ? SPAWN_A : SPAWN_B);
+        const sp = pos || randElement(list);
         this.position.set(sp.x + rand(-1.2, 1.2), 0, sp.z + rand(-1.2, 1.2));
         this.velocity.set(0, 0, 0);
         this.health = this.maxHealth;
@@ -146,8 +155,9 @@ export class Bot {
 
     // ── navigation ──────────────────────────────────────────────────────────
     pickGoal() {
-        // push toward the far half of the map, occasionally hold a perch
-        const forward = this.team === TEAM_A ? 1 : -1;
+        // push toward the far half of the map, occasionally hold a perch.
+        // `pushDir` lets a teamless mode send this soldier the other way instead.
+        const forward = this.pushDir || (this.team === TEAM_A ? 1 : -1);
         if (Math.random() < 0.18) {
             const p = randElement(PERCHES.filter(q => Math.sign(q.x) === forward || Math.random() < 0.5));
             this.goal = { x: p.x, z: p.z, perch: true };
@@ -163,6 +173,21 @@ export class Bot {
             this.goal = best;
         }
         this.goalTimer = rand(6, 12);
+    }
+
+    /**
+     * Who this soldier will shoot at.
+     *
+     * Team play is a single comparison — `e.team === this.team` means friend.
+     * Free For All cannot be expressed that way with two team ids, so the mode
+     * sets `allHostile` and every live soldier becomes fair game, including the
+     * rest of what used to be his own side. Bots killing each other is the point:
+     * the leaderboard is per person, so an AI v AI kill scores the same as a kill
+     * on you.
+     */
+    isHostile(e) {
+        if (!e || !e.alive) return false;
+        return this.allHostile || e.team !== this.team;
     }
 
     /**
@@ -217,7 +242,7 @@ export class Bot {
         this.eyePos(_a);
         const fwdX = -Math.sin(this.yaw), fwdZ = -Math.cos(this.yaw);
         for (const e of entities) {
-            if (!e.alive || e.team === this.team) continue;
+            if (!this.isHostile(e)) continue;
             const dx = e.position.x - this.position.x, dz = e.position.z - this.position.z;
             const d = Math.hypot(dx, dz);
             if (d > VIEW_RANGE) continue;

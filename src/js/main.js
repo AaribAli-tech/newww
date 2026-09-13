@@ -10,6 +10,7 @@ import { Bot } from './ai.js';
 import { HUD } from './hud.js';
 import { Effects } from './effects.js';
 import { Killstreaks } from './killstreaks.js';
+import { KillChain, milestoneFor, milestoneProgress } from './medals.js';
 import { createMode, MODES } from './modes.js';
 import { selectedMode as pickedMode, onModeChange } from './hud.js';
 import { createPostFX } from './shaders.js';
@@ -55,6 +56,9 @@ let qualityHeadroom = 0, autoQualityLocked = false;
 const dprCooldownStep = 1.0;
 let fpsAccum = 0, fpsFrames = 0;
 let respawnTimer = 0;
+// Chained kills (double/triple/multi) and the streak-name ladder. Kept out here
+// rather than on Player so the death/respawn paths can clear them together.
+const killChain = new KillChain();
 let deadInfo = null;
 let boardOpen = false;
 let shadowTick = 0;
@@ -357,6 +361,13 @@ function finishBoot() {
         get camera() { return camera; },
         get specTarget() { return specTarget; },
         cycleSpectate,
+        /**
+         * Run the real kill path for one synthetic kill, so the browser harness can
+         * assert what a kill does to the HUD (medals, feed, streak strip, score)
+         * without having to land a shot on a moving soldier through a software
+         * rasteriser. `registerKill` is the same function a hit calls.
+         */
+        debugKill: (head = false, name = 'TEST') => registerKill({ name: name || 'TEST' }, 'M4A1', !!head, false),
         // one frame of the spectator camera, callable without rendering —
         // scripts/verify.mjs asserts on the shot this produces
         spectateStep: updateSpectator,
@@ -625,6 +636,9 @@ function startMatch() {
     $('menu').style.display = 'none';
     $('panel').style.display = 'none';
     hud.hideEnd(); hud.hideDeath();
+    killChain.reset();
+    hud.clearMedals();
+    hud.streakRun(0);
     $('pause').classList.remove('on');
     hud.show(true);
 
@@ -723,15 +737,24 @@ function registerKill(bot, weaponLabel, head, fromStreak) {
     player.matchKills++;
     player.killStreak++;
     player.score += head ? 150 : 100;
-    gamemode.addKill(TEAM_A);
+    // One path, not two. main used to call gamemode.addKill() here and onKill()
+    // for bot kills, which (a) counted a bot-vs-bot kill twice against the team
+    // tally, (b) handed Round Control a round win every third player kill, since
+    // that mode scores rounds through the same tally, and (c) meant a *player*
+    // kill never reached the mode at all — so in Gun Game you could never move up
+    // a gun and in Free For All you could never reach 200. Modes decide what a
+    // kill is worth; main just reports it.
+    gamemode.onKill(player, bot, player.def || { short: weaponLabel, name: weaponLabel }, head);
     hud.killfeed('You', bot.name, weaponLabel, true, head);
 
-    if (head) hud.banner('HEADSHOT', '#FFC24A', `+150  ${bot.name}`);
-    else if (!fromStreak && player.killStreak > 1) {
-        if (player.killStreak === 3) hud.banner('KILLSTREAK ×3', '#fff', 'On a roll');
-        else if (player.killStreak === 5) hud.banner('KILLSTREAK ×5', '#FF9A3C', 'Dominating');
-        else if (player.killStreak >= 8) hud.banner(`KILLSTREAK ×${player.killStreak}`, '#FF7A18', 'Unstoppable');
-    }
+    // The stack over the crosshair says what the kill was; the feed on the right
+    // says who it was. A reward that came off a streak (nukes, airstrikes) still
+    // earns the kill but keeps the milestone banners to itself.
+    const chain = killChain.note(performance.now() / 1000, head, player.killStreak);
+    if (!fromStreak) hud.medals(chain.medals);
+    hud.streakRun(player.killStreak,
+        milestoneFor(player.killStreak)?.label,
+        milestoneProgress(player.killStreak));
 
     // announce newly available rewards
     for (const s of ['uav', 'air', 'nuke']) {
@@ -747,6 +770,14 @@ function registerKill(bot, weaponLabel, head, fromStreak) {
 
 function onPlayerDeath(killerName) {
     A.playDeath();
+    // A streak is only worth anything because it can be lost, so say so when it
+    // was long enough to matter.
+    if (player.killStreak >= 3) {
+        hud.banner(`STREAK LOST ×${player.killStreak}`, '#FF4D4D', 'Reset by ' + (killerName || 'the map'));
+    }
+    killChain.reset();
+    hud.clearMedals();
+    hud.streakRun(0);
     streaks.onPlayerDeath();
     streaks.announced = {};
     respawnTimer = RESPAWN_TIME;
@@ -787,7 +818,6 @@ function handleBotEvents(bot, events) {
                 // which would paint a red billboard across the camera.
                 player.takeDamage(e.damage, bot.name, e.from);
                 if (!player.alive) {
-                    gamemode.addKill(TEAM_B);
                     gamemode.onKill(bot, playerProxy, bot.weapon, e.head);
                     bot.kills++; bot.killStreak++; bot.score += 100;
                     hud.killfeed(bot.name, 'You', bot.weapon.short, false, e.head);
@@ -798,7 +828,6 @@ function handleBotEvents(bot, events) {
                 effects.blood(e.to, _v.set(0, 0, 0));
                 const killed = tgt.takeDamage(e.damage, bot.name);
                 if (killed) {
-                    gamemode.addKill(bot.team);
                     gamemode.onKill(bot, tgt, bot.weapon, e.head);
                     gamemode.onBotDeath(tgt);
                     bot.kills++; bot.killStreak++; bot.score += 100;
@@ -1031,7 +1060,7 @@ function loop(ts) {
         scopeAmount: vm.scopeAmount
     });
     hud.scope(vm.scopeAmount || 0);
-    hud.scoreboard(boardOpen, player, bots, gamemode.teamAScore, gamemode.teamBScore);
+    hud.scoreboard(boardOpen, player, bots, gamemode.teamAScore, gamemode.teamBScore, gamemode);
 
     // grade uniforms
     const g = composerFX.grade.uniforms;
