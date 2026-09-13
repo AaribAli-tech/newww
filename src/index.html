@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
 <meta charset="UTF-8">
-<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
 <title>NUKETOWN</title>
 <!-- Fonts are self-hosted: no third-party stylesheet to wait for before the menu
      paints. The web build folds fonts.css into the site stylesheet; this plain
@@ -14,7 +14,7 @@
 <link rel="manifest" href="manifest.webmanifest">
 <meta name="theme-color" content="#06080b">
 <meta name="color-scheme" content="dark">
-<meta name="description" content="NUKETOWN - a browser first-person shooter. 5v5 Team Deathmatch and one-life Round Control on a 1962 desert test site. No install, no login: click Deploy.">
+<meta name="description" content="NUKETOWN - a browser first-person shooter. 5v5 Team Deathmatch and one-life Round Control on a 1962 desert test site. No install, no login: click Deploy. Mouse and keyboard on a computer, thumb controls on a phone.">
 <meta property="og:type" content="website">
 <meta property="og:title" content="NUKETOWN - browser FPS">
 <meta property="og:description" content="5v5 Team Deathmatch and one-life Round Control in your browser. No install, no login - click Deploy.">
@@ -114,6 +114,10 @@ canvas#gameCanvas{display:block;width:100vw;height:100vh}
 .kv{display:flex;justify-content:space-between;padding:7px 0;border-bottom:1px solid rgba(255,255,255,.06);
   font-size:15px;color:rgba(255,255,255,.75);letter-spacing:1px}
 .kv b{color:#fff;font-weight:600;font-family:'Barlow Condensed',sans-serif;letter-spacing:2px}
+/* the phone rows only make sense once there is a phone */
+.kv.phone{display:none}
+body.touch .kv.phone{display:flex}
+body.touch .kv.desk{display:none}
 .rowSet{display:flex;align-items:center;gap:14px;padding:12px 0}
 .rowSet label{font-size:14px;letter-spacing:2px;color:rgba(255,255,255,.6);
   text-transform:uppercase;width:150px}
@@ -442,6 +446,110 @@ canvas#gameCanvas{display:block;width:100vw;height:100vh}
 #pauseHint{position:absolute;bottom:8px;left:50%;transform:translateX(-50%);
   font-family:'Barlow Condensed',sans-serif;font-size:11px;letter-spacing:.3em;
   color:rgba(255,255,255,.22);text-transform:uppercase}
+/* ══════════════════════ TOUCH / MOBILE ══════════════════════ */
+/* Phones only — body.touch is set by touch.js. A touchscreen laptop keeps the
+   desktop HUD and the mouse. */
+body.touch{touch-action:none;-webkit-touch-callout:none;overscroll-behavior:none}
+body.touch #gameCanvas{touch-action:none}
+body.touch #rotate.on{display:grid}
+
+/* The HUD is laid out for a ~1440px desktop window; a landscape phone gives the
+   game roughly 860x400. Each readout is scaled about the corner it is pinned to
+   (so nothing has to be re-flowed) and moved up top, clear of the thumbs:
+   minimap and the HP/ammo blocks at a quarter and two-fifths of their desktop
+   size, which is what leaves the middle of the screen to actually looking. */
+body.touch #miniWrap{transform:scale(.25);transform-origin:top left;top:8px;left:8px}
+body.touch #matchBar{transform:translateX(-50%) scale(.52);transform-origin:top center;top:8px;left:50%}
+body.touch #streakCol{transform:scale(.86);transform-origin:top left;
+  left:10px;right:auto;top:64px}
+body.touch #skipRound{bottom:calc(16px + env(safe-area-inset-bottom));left:12px;right:auto;top:auto;
+  padding:9px 14px;font-size:12px}
+body.touch #healthWrap{transform:scale(.4);transform-origin:top left;top:12px;left:74px;bottom:auto}
+/* the labelled PAUSE pill is ~90px wide, so the ammo readout ends short of it */
+body.touch #brWrap{transform:scale(.4);transform-origin:top right;top:12px;right:164px;bottom:auto}
+body.touch #killfeed{transform:scale(.62);transform-origin:top right;top:46px;right:10px}
+body.touch #nukeTrack{transform:translateX(-50%) scale(.66);transform-origin:top center;top:8px}
+body.touch #eventFeed{transform:translateX(-50%) scale(.82)}
+body.touch #gameBtns{top:8px;right:8px;gap:8px}
+body.touch .gbtn{width:46px;height:46px;font-size:20px;border-radius:9px;background:rgba(4,6,9,.62)}
+/* the pause control is the one button a phone player must find without hunting */
+body.touch #btnHudPause{width:auto;padding:0 13px;gap:7px;color:#fff;
+  border-color:rgba(255,122,24,.5)}
+body.touch #btnHudPause::after{content:'PAUSE';font-family:'Barlow Condensed',sans-serif;
+  font-size:13px;letter-spacing:.22em}
+body.touch #spectate{transform:translate(-50%,-50%) scale(.86)}
+/* the perf strip would sit on the score/timer; on a phone it goes bottom-centre,
+   which is the one patch of screen no thumb or readout needs */
+body.touch #perfHud{top:auto;bottom:6px;transform:translateX(-50%) scale(.82);
+  transform-origin:bottom center}
+/* the settings panel has to be operable with a finger */
+body.touch #panel select,body.touch #panel button{min-height:40px;font-size:15px}
+body.touch #panel input[type=range]{height:32px}
+body.touch #specName{font-size:24px}
+/* the 1-4 strip is redundant once the weapon buttons are on-screen */
+body.touch #slots{display:none}
+body.touch #pauseHint{display:none}
+body.touch .menuBtn{font-size:21px;padding:9px 42px;letter-spacing:.22em}
+body.touch .card{max-height:82vh;overflow:auto;padding:20px 20px}
+body.touch .kv{font-size:14px}
+body.touch #menu h1{font-size:clamp(38px,12vw,78px);letter-spacing:.14em}
+body.touch #modePick{width:min(400px,86vw)}
+body.touch #modePickLabel{letter-spacing:.3em}
+
+/* ── the control layer ─────────────────────────────────────────────────────
+   Left half under the HUD line is the move stick — it appears under the thumb
+   wherever it lands. The whole right side is the look pad. FIRE sits bottom
+   right, aim/reload/jump/crouch above it, weapon slots above that. */
+/* Below #hud (z-index 100) on purpose: the look pad covers the whole right
+   half, so anything the HUD wants tapped has to win the hit test. */
+#touchUI{position:fixed;inset:0;z-index:90;display:none;pointer-events:none;
+  font-family:'Barlow Condensed',sans-serif;-webkit-tap-highlight-color:transparent}
+#touchUI.on{display:block}
+#touchUI .tz{position:absolute;z-index:1;pointer-events:auto;touch-action:none}
+#tStickZone{left:0;right:46%;top:22%;bottom:0}
+#tLookZone{left:54%;right:0;top:0;bottom:0}
+#tStickZone::after{content:'MOVE';position:absolute;left:26px;
+  bottom:calc(58px + env(safe-area-inset-bottom));
+  font-size:11px;letter-spacing:.34em;color:rgba(255,255,255,.2)}
+#tLookZone::after{content:'LOOK';position:absolute;right:26px;top:calc(74px + env(safe-area-inset-top));
+  font-size:11px;letter-spacing:.34em;color:rgba(255,255,255,.2)}
+.tpad{position:absolute;width:132px;height:132px;margin:-66px 0 0 -66px;display:none;
+  border:1px solid rgba(255,255,255,.18);border-radius:50%;background:rgba(6,8,11,.4)}
+.tpad.on{display:block}
+.tknob{position:absolute;left:50%;top:50%;width:58px;height:58px;transform:translate(-50%,-50%);
+  border-radius:50%;background:rgba(255,122,24,.5);
+  box-shadow:0 0 0 1px rgba(255,122,24,.8),0 4px 14px rgba(0,0,0,.6)}
+.trow{position:absolute;z-index:3;display:flex;gap:9px;align-items:flex-end;pointer-events:none}
+#tFireRow{right:calc(12px + env(safe-area-inset-right));bottom:calc(16px + env(safe-area-inset-bottom))}
+#tActions{right:calc(12px + env(safe-area-inset-right));bottom:calc(132px + env(safe-area-inset-bottom))}
+#tWeapons{right:calc(12px + env(safe-area-inset-right));bottom:calc(196px + env(safe-area-inset-bottom))}
+.tbtn{pointer-events:auto;touch-action:none;-webkit-appearance:none;appearance:none;
+  width:56px;height:56px;border-radius:50%;border:1px solid rgba(255,255,255,.26);
+  background:rgba(6,9,13,.5);color:rgba(255,255,255,.86);
+  font:600 12px/1 'Barlow Condensed',sans-serif;letter-spacing:.08em;text-transform:uppercase;
+  display:grid;place-items:center;padding:0;margin:0;
+  box-shadow:inset 0 1px 0 rgba(255,255,255,.07),0 3px 10px rgba(0,0,0,.45)}
+.tbtn.down{background:rgba(255,122,24,.5);border-color:var(--accent);color:#111}
+.tbtn.fire{width:106px;height:106px;font-family:'Teko',sans-serif;font-size:19px;letter-spacing:.16em;
+  background:rgba(255,122,24,.15);border-color:rgba(255,122,24,.7);color:var(--accent)}
+.tbtn.fire.down{background:var(--accent);color:#111}
+.tbtn.slot{width:34px;height:32px;border-radius:7px;font-size:15px;font-family:'Teko',sans-serif}
+.tbtn.slot.on{border-color:var(--accent);color:var(--accent);background:rgba(255,122,24,.14)}
+.tbtn.busy{border-color:#FFC24A;color:#FFC24A}
+
+/* ── portrait gate ─────────────────────────────────────────────────────────*/
+#rotate{position:fixed;inset:0;z-index:2000;display:none;place-items:center;align-content:center;
+  gap:4px;text-align:center;background:#06080b;padding:26px}
+#rotate h2{font-family:'Teko',sans-serif;font-size:34px;letter-spacing:.16em;text-transform:uppercase;
+  color:var(--accent);margin:16px 0 6px}
+#rotate p{font-size:12px;letter-spacing:.22em;color:var(--dim);text-transform:uppercase;
+  max-width:320px;line-height:1.9}
+.rphone{position:relative;width:124px;height:76px;border:2px solid var(--accent);border-radius:11px;
+  animation:rturn 2.6s ease-in-out infinite}
+.rphone span{position:absolute;left:50%;top:50%;width:15px;height:15px;margin:-7.5px 0 0 -7.5px;
+  border-radius:50%;background:rgba(255,122,24,.55)}
+@keyframes rturn{0%,16%{transform:rotate(90deg)}54%,76%{transform:rotate(0)}100%{transform:rotate(90deg)}}
+@media (prefers-reduced-motion: reduce){.rphone{animation:none;transform:rotate(90deg)}}
 </style>
 </head>
 <body>
@@ -473,17 +581,20 @@ canvas#gameCanvas{display:block;width:100vw;height:100vh}
 <div id="panel">
   <div class="card">
     <h2>Controls</h2>
-    <div class="kv"><span>Move</span><b>W A S D</b></div>
-    <div class="kv"><span>Sprint</span><b>SHIFT</b></div>
-    <div class="kv"><span>Crouch</span><b>C  /  CTRL</b></div>
-    <div class="kv"><span>Jump</span><b>SPACE</b></div>
-    <div class="kv"><span>Fire</span><b>LEFT MOUSE</b></div>
-    <div class="kv"><span>Aim down sights</span><b>RIGHT MOUSE</b></div>
-    <div class="kv"><span>Reload</span><b>R</b></div>
-    <div class="kv"><span>Weapons</span><b>1 – 4  /  Q  /  WHEEL</b></div>
-    <div class="kv"><span>UAV / Airstrike / Nuke</span><b>Z &nbsp; X &nbsp; V</b></div>
-    <div class="kv"><span>Scoreboard</span><b>TAB</b></div>
-    <div class="kv"><span>Pause</span><b>ESC</b></div>
+    <div class="kv desk"><span>Move</span><b>W A S D</b></div>
+    <div class="kv desk"><span>Sprint</span><b>SHIFT</b></div>
+    <div class="kv desk"><span>Crouch</span><b>C  /  CTRL</b></div>
+    <div class="kv desk"><span>Jump</span><b>SPACE</b></div>
+    <div class="kv desk"><span>Fire</span><b>LEFT MOUSE</b></div>
+    <div class="kv desk"><span>Aim down sights</span><b>RIGHT MOUSE</b></div>
+    <div class="kv desk"><span>Reload</span><b>R</b></div>
+    <div class="kv desk"><span>Weapons</span><b>1 – 4  /  Q  /  WHEEL</b></div>
+    <div class="kv desk"><span>UAV / Airstrike / Nuke</span><b>Z &nbsp; X &nbsp; V</b></div>
+    <div class="kv desk"><span>Scoreboard</span><b>TAB</b></div>
+    <div class="kv desk"><span>Pause</span><b>ESC</b></div>
+    <div class="kv phone"><span>Phone — move</span><b>LEFT THUMB, DRAG</b></div>
+    <div class="kv phone"><span>Phone — aim / shoot</span><b>RIGHT THUMB · FIRE BUTTON</b></div>
+    <div class="kv phone"><span>Phone — spectate</span><b>TAP THE RIGHT SIDE</b></div>
     <div class="rowSet">
       <label>Sensitivity</label>
       <input type="range" id="sensRange" min="20" max="400" value="100">
@@ -587,6 +698,14 @@ canvas#gameCanvas{display:block;width:100vw;height:100vh}
     <div id="specHint">Click to switch operator</div>
   </div>
   <button id="skipRound">Skip round</button>
+</div>
+
+
+<!-- portrait gate — only ever shown on a touch device (see applyOrientation) -->
+<div id="rotate">
+  <div class="rphone"><span></span></div>
+  <h2>Turn your phone</h2>
+  <p>NUKETOWN is a landscape game &nbsp;&bull;&nbsp; rotate to deploy</p>
 </div>
 
 <div id="scope">

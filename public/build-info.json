@@ -1,9 +1,9 @@
 {
-  "version": "03534be04a",
-  "builtAt": "2026-09-13T05:20:47.331Z",
+  "version": "d84167a3f2",
+  "builtAt": "2026-09-13T07:44:05.465Z",
   "files": [
-    "js/game.c847eb1b01.js",
-    "css/styles.e59f31b48e.css",
+    "js/game.b545fbcadd.js",
+    "css/styles.357437fa19.css",
     "sw.js",
     {
       "file": "favicon.svg",

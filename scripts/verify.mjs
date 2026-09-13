@@ -119,7 +119,7 @@ const t0 = Date.now();
 await page.goto(URL_BASE + '/', { waitUntil: 'domcontentloaded', timeout: 60000 });
 
 // wait for the game to reach its menu
-await page.waitForFunction('window.__nuketown && window.__nuketown.state === "menu"', { timeout: 90000 });
+await page.waitForFunction('window.__nuketown && window.__nuketown.state === "menu"', { timeout: 90000, polling: 400 });
 timings['→ menu'] = { status: 200, cache: '-', enc: '-', bytes: 0, ms: Date.now() - t0 };
 log(`\n menu reachable in ${Date.now() - t0} ms`);
 
@@ -127,7 +127,7 @@ log(`\n menu reachable in ${Date.now() - t0} ms`);
 await page.evaluate(() => {
     document.getElementById('btnStart').click();
 });
-await page.waitForFunction('window.__nuketown.state === "playing"', { timeout: 30000 });
+await page.waitForFunction('window.__nuketown.state === "playing"', { timeout: 30000, polling: 400 });
 log('\n match started — sampling frame time');
 
 const report = await page.evaluate(async () => {
@@ -267,7 +267,7 @@ const firstWire = net.wire, firstCached = net.cached, firstReqs = net.requests;
 const bytesBefore = bytes;
 const tReload = Date.now();
 await page.reload({ waitUntil: 'domcontentloaded', timeout: 90000 });
-await page.waitForFunction('window.__nuketown && window.__nuketown.state === "menu"', { timeout: 120000 });
+await page.waitForFunction('window.__nuketown && window.__nuketown.state === "menu"', { timeout: 120000, polling: 400 });
 const reloadMs = Date.now() - tReload;
 const reloadWire = net.wire - firstWire;
 log(`\n first visit       menu in ${timings['→ menu'].ms} ms · ${(firstWire / 1024).toFixed(0)} KB over the network` +

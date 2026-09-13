@@ -78,6 +78,12 @@ export class Player {
         this.mouseRight = false;
         this.locked = false;
         this.paused = false;
+        // Touch mode (see touch.js). `touchMode` replaces pointer lock as the
+        // "input is live" gate, and `axis` is the analog stick vector
+        // (x = strafe, y = forward, both -1..1) that stands in for WASD.
+        this.touchMode = false;
+        this.axis = { x: 0, y: 0 };
+        this.sprintTouch = false;
 
         this._bind();
     }
@@ -102,23 +108,11 @@ export class Player {
         });
         window.addEventListener('keyup', e => { this.keys[e.code] = false; });
         window.addEventListener('mousemove', e => {
-            if (!this.locked || !this.alive || this.paused) return;
-            // Pointer lock occasionally emits a single enormous delta (window
-            // focus changes, driver hiccups). Unclamped, that snaps the view
-            // right round and feels like the mouse "slipped".
-            const mx = clamp(e.movementX, -MAX_DELTA, MAX_DELTA);
-            const my = clamp(e.movementY, -MAX_DELTA, MAX_DELTA);
-            // ADS scaling follows the zoom ratio so the same hand movement
-            // covers the same on-screen distance whether hipfiring or aiming.
-            const zoom = this.isADS ? this.baseFov / Math.max(10, this.camera.fov) : 1;
-            const scale = this.sensitivity / (1 + (zoom - 1) * this.adsSensScale);
-            this.yaw -= mx * scale;
-            this.pitch -= my * scale;
-            this.pitch = clamp(this.pitch, -PITCH_LIMIT, PITCH_LIMIT);
-            this.vm.addLook(mx, my);
+            if (!this.active || !this.alive) return;
+            this.addLookDelta(e.movementX, e.movementY);
         });
         window.addEventListener('mousedown', e => {
-            if (!this.locked) return;
+            if (!this.active) return;
             if (e.button === 0) this.mouseDown = true;
             if (e.button === 2) this.mouseRight = true;
         });
@@ -128,10 +122,36 @@ export class Player {
         });
         window.addEventListener('contextmenu', e => e.preventDefault());
         window.addEventListener('wheel', e => {
-            if (!this.locked || !this.alive) return;
+            if (!this.active || !this.alive) return;
             const n = WEAPON_DEFS.length;
             this.switchTo((this.current + (e.deltaY > 0 ? 1 : n - 1)) % n);
         }, { passive: true });
+    }
+
+    /** True when the mouse/keys should drive this player: locked, or on touch. */
+    get active() { return this.locked || this.touchMode; }
+
+    /**
+     * Turn a look delta, measured in mouse pixels, into yaw/pitch.
+     *
+     * The mouse handler and the touch look pad both come through here, so aim
+     * feel, ADS scaling and the viewmodel's lag cannot drift apart per device.
+     */
+    addLookDelta(dx, dy) {
+        if (!this.alive || this.paused) return;
+        // Pointer lock occasionally emits a single enormous delta (window
+        // focus changes, driver hiccups). Unclamped, that snaps the view
+        // right round and feels like the mouse "slipped".
+        const mx = clamp(dx, -MAX_DELTA, MAX_DELTA);
+        const my = clamp(dy, -MAX_DELTA, MAX_DELTA);
+        // ADS scaling follows the zoom ratio so the same hand movement
+        // covers the same on-screen distance whether hipfiring or aiming.
+        const zoom = this.isADS ? this.baseFov / Math.max(10, this.camera.fov) : 1;
+        const scale = this.sensitivity / (1 + (zoom - 1) * this.adsSensScale);
+        this.yaw -= mx * scale;
+        this.pitch -= my * scale;
+        this.pitch = clamp(this.pitch, -PITCH_LIMIT, PITCH_LIMIT);
+        this.vm.addLook(mx, my);
     }
 
     get def() { return WEAPON_DEFS[this.current]; }
@@ -417,8 +437,10 @@ export class Player {
 
     _move(dt) {
         this.isADS = this.mouseRight && !this.mag.reloading && this.vm.switchT === 0;
-        const wantSprint = (this.keys['ShiftLeft'] || this.keys['ShiftRight']) &&
-            !this.isADS && !this.isCrouching && (this.keys['KeyW'] || this.keys['KeyA'] || this.keys['KeyD']);
+        const moving = this.keys['KeyW'] || this.keys['KeyA'] || this.keys['KeyD'] ||
+            Math.hypot(this.axis.x, this.axis.y) > 0.55;
+        const wantSprint = (this.keys['ShiftLeft'] || this.keys['ShiftRight'] || this.sprintTouch) &&
+            !this.isADS && !this.isCrouching && moving;
         this.isSprinting = wantSprint && this.onGround;
 
         if (this.keys['ControlLeft']) this.isCrouching = true;
@@ -434,6 +456,12 @@ export class Player {
         if (this.keys['KeyS']) { wx -= fx; wz -= fz; }
         if (this.keys['KeyD']) { wx += rx; wz += rz; }
         if (this.keys['KeyA']) { wx -= rx; wz -= rz; }
+        // analog stick: the same forward/right basis as the keys, but continuous,
+        // so a half-pushed thumb walks instead of sprinting
+        if (this.axis.x || this.axis.y) {
+            wx += fx * this.axis.y + rx * this.axis.x;
+            wz += fz * this.axis.y + rz * this.axis.x;
+        }
         const wl = Math.hypot(wx, wz);
         if (wl > 0) { wx /= wl; wz /= wl; }
 
