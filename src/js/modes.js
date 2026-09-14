@@ -55,12 +55,6 @@ function spawnPoint(team, i) {
     return list[i % list.length];
 }
 
-function mmss(t) {
-    if (!isFinite(t)) return '--:--';
-    const s = Math.max(0, Math.ceil(t));
-    return `${(s / 60) | 0}:${String(s % 60).padStart(2, '0')}`;
-}
-
 // ── base ────────────────────────────────────────────────────────────────────
 class BaseMode {
     constructor(meta, ctx, opts) {
@@ -88,7 +82,6 @@ class BaseMode {
         };
         this._result = { won: false, title: '', subtitle: '' };
         this._alive = { a: 0, b: 0 };
-        this._sec = -1;
     }
 
     // ── legacy TeamDeathmatch surface ───────────────────────────────────────
@@ -122,7 +115,6 @@ class BaseMode {
     // ── lifecycle ───────────────────────────────────────────────────────────
     reset() {
         this.scoring.reset();
-        this._sec = -1;
         this._alive.a = this._alive.b = 0;
     }
 
@@ -187,16 +179,12 @@ class BaseMode {
     }
 
     hudState() {
+        // No primary line here on purpose: the match clock under the scorebar
+        // shows the same countdown, and having the mode repeat it one row below
+        // read as two timers ticking out of sync (9:59 next to 10:00).
         const h = this._hud;
-        h.primary = this._clock(this.timeRemaining);
+        h.primary = '';
         return h;
-    }
-
-    /** mm:ss, rebuilt only when the displayed second actually changes. */
-    _clock(t) {
-        const s = isFinite(t) ? Math.max(0, Math.ceil(t)) : -1;
-        if (s !== this._sec) { this._sec = s; this._clockStr = mmss(t); }
-        return this._clockStr;
     }
 
     // ── bot bookkeeping ─────────────────────────────────────────────────────
@@ -365,7 +353,7 @@ class RoundControl extends BaseMode {
         h.lives = this._alive.a;
         h.livesA = this._alive.a;
         h.livesB = this._alive.b;
-        h.primary = this._clock(this.timeRemaining);
+        h.primary = '';
 
         // Rebuild the caption only when something in it moved.
         const key = this.phase === 'live' ? this.round * 100 + this._alive.a * 10 + this._alive.b

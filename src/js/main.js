@@ -102,6 +102,7 @@ const _v = new THREE.Vector3();
 const _specFrom = new THREE.Vector3();
 const _specWant = new THREE.Vector3();
 const _specDir = new THREE.Vector3();
+const _specAlt = new THREE.Vector3();
 
 // A missing GPU blocklist entry or a disabled "hardware acceleration" flag used to
 // mean an eternal loading bar. Say what is wrong instead.
@@ -855,6 +856,17 @@ function handleBotEvents(bot, events) {
 const SPEC_BACK = 4.1;        // metres behind the operator
 const SPEC_UP = 0.95;         // metres above their head
 const SPEC_SHOULDER = 0.55;   // offset so the back of the head does not fill the frame
+const SPEC_CLEAR = 2.1;       // metres of air a framing wants behind the head
+const SPEC_MIN = 1.15;        // never closer than this, or you are inside the helmet
+// Candidate shots, best first: back distance, lift, sideways offset. The wide
+// and high ones exist for the case the plain chase cam cannot serve — a teammate
+// with a wall right behind them.
+const SPEC_TRIES = [
+    { back: SPEC_BACK, up: SPEC_UP, side: SPEC_SHOULDER },
+    { back: SPEC_BACK, up: SPEC_UP, side: -SPEC_SHOULDER },
+    { back: 2.95, up: 1.95, side: SPEC_SHOULDER * 1.6 },
+    { back: 5.6, up: 1.45, side: SPEC_SHOULDER * 2.4 }
+];
 let specTarget = null;
 let specSnap = true;   // jump to the pose instead of sliding there
 let specLive = false;  // has the chase cam taken over from the death fall yet
@@ -899,24 +911,38 @@ function updateSpectator(dt = 0.016) {
     // aim pitch so the shot tracks a soldier looking over a roof or down stairs
     const cp = Math.cos(pitch);
     const fx = -Math.sin(yaw) * cp, fz = -Math.cos(yaw) * cp, fy = Math.sin(pitch);
-    _specWant.set(
-        _specFrom.x - fx * SPEC_BACK + Math.cos(yaw) * SPEC_SHOULDER,
-        _specFrom.y - fy * SPEC_BACK + SPEC_UP,
-        _specFrom.z - fz * SPEC_BACK - Math.sin(yaw) * SPEC_SHOULDER
-    );
-
-    // Pull the shot in when a wall or doorframe is in the way, so an operator
-    // standing in a doorway does not put the camera out in the street behind the
-    // house. Visual meshes are merged, but collision is per-AABB, which is
-    // exactly what a spectator cam wants to test against.
-    _specDir.subVectors(_specWant, _specFrom);
-    const want = _specDir.length();
-    if (want > 0.001) {
+    // Pick a framing that actually has room. A wall or doorframe behind the
+    // operator used to pull the camera in until it sat inside their backpack,
+    // which is worse than useless — you saw nothing at all. So instead of
+    // shrinking the one shot we had, walk the candidates and keep the first one
+    // that is both far enough away and clear of geometry; if none of them are,
+    // take the one with the most air.
+    //
+    // Visual meshes are merged, but collision is per-AABB, which is exactly what
+    // a spectator cam wants to test against.
+    let found = false, best = -1;
+    for (let i = 0; i < SPEC_TRIES.length; i++) {
+        const f = SPEC_TRIES[i];
+        _specAlt.set(
+            _specFrom.x - fx * f.back + Math.cos(yaw) * f.side,
+            _specFrom.y - fy * f.back + f.up,
+            _specFrom.z - fz * f.back - Math.sin(yaw) * f.side
+        );
+        _specDir.subVectors(_specAlt, _specFrom);
+        const want = _specDir.length();
+        if (want < SPEC_MIN) continue;
         _specDir.multiplyScalar(1 / want);
         const hit = cw && cw.raycast ? cw.raycast(_specFrom, _specDir, want) : null;
-        const allow = hit ? Math.max(0.9, hit.distance - 0.4) : want;
-        if (allow < want) _specWant.copy(_specFrom).addScaledVector(_specDir, allow);
+        const air = hit ? Math.min(hit.distance, want) : want;
+        if (!found || air > best) {
+            found = true; best = air;
+            _specWant.copy(_specAlt);
+        }
+        if (!hit || (air >= want - 0.001 && air >= SPEC_CLEAR)) break;
     }
+    // Should not happen — the widest candidate always has somewhere to stand —
+    // but a camera that never moves is a worse failure than an awkward angle.
+    if (!found) _specWant.copy(_specFrom).addScaledVector(_specDir, SPEC_BACK);
 
     // Damped so following a running teammate is smooth; a hard snap every time the
     // target changes would be nauseating, which is why specSnap only covers cuts.

@@ -262,6 +262,18 @@ group('modes.js — no regressions in the two team modes');
     ok('Round Control keeps its one-life rule and its nuke ban',
         ctl.canRespawn(player) === false && ctl.disabledStreaks.has('nuke'));
     ok('Round Control is not a solo mode', ctl.noTeams === false);
+
+    // One clock, not two. The scorebar already prints the countdown, so a mode
+    // that repeats it one row below reads as a desync (10:00 beside 9:59).
+    ok('Team Deathmatch leaves the match clock to the scorebar',
+        tdm.hudState().primary === '', JSON.stringify(tdm.hudState().primary));
+    ok('Round Control leaves the match clock to the scorebar',
+        ctl.hudState().primary === '', JSON.stringify(ctl.hudState().primary));
+    ok('Round Control still captions the round',
+        /ROUND/.test(ctl.hudState().secondary), ctl.hudState().secondary);
+    ok('Free For All and Gun Game still own their primary line',
+        /^ME \d+ \/ 200$/.test(createMode('ffa', ctx).hudState().primary) &&
+        /^\d+ \/ \d+$/.test(createMode('gun', ctx).hudState().primary));
 }
 
 console.log(`\n${fail === 0 ? '✓' : '✗'} ${pass} passed, ${fail} failed\n`);
