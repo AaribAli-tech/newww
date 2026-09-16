@@ -22,6 +22,9 @@ export class Player {
         this.ctx = ctx;
         this.team = TEAM_A;
         this.name = 'You';
+        // Set by the mode when it has no teams (Free For All, Gun Game). While it
+        // is true there are no friendlies to filter out, so nothing is unhittable.
+        this.allHostile = false;
 
         this.position = new THREE.Vector3(0, 0, 0);
         this.velocity = new THREE.Vector3();
@@ -218,6 +221,15 @@ export class Player {
         }
     }
 
+    /**
+     * Who this weapon may damage. Bots ask the same question of themselves with
+     * `isHostile` in ai.js; both have to consult the mode, or a teamless mode ends
+     * up with soldiers you can walk through but not shoot.
+     */
+    canShoot(e) {
+        return !!this.allHostile || (!!e && e.team !== this.team);
+    }
+
     _trace(origin, dir, d, muzzleWorld) {
         const world = this.cw.raycast(origin, dir, d.range);
         let wallDist = world ? world.distance : d.range;
@@ -225,7 +237,7 @@ export class Player {
         // bots: ray vs. three body spheres, nearest wins
         let best = null, bestT = wallDist, bestHead = false;
         for (const bot of this.ctx.getBots()) {
-            if (!bot.alive || bot.team === this.team || bot.spawnProtect > 0) continue;
+            if (!bot.alive || !this.canShoot(bot) || bot.spawnProtect > 0) continue;
             const cr = bot.isCrouching;
             const spots = cr
                 ? [[0.55, 0.30, false], [0.85, 0.30, false], [1.05, 0.15, true]]

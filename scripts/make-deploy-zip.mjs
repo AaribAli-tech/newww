@@ -26,7 +26,11 @@ const FOLDER = argName('--name', 'nuketown-vercel-deploy');
 const STAGE = path.join(ROOT, '.cache', 'deploy-stage');
 const OUT_ZIP = path.join(ROOT, `${FOLDER}.zip`);
 
-const INCLUDE_DIRS = ['public', 'scripts', 'src/js', 'src/fonts'];
+const INCLUDE_DIRS = ['public', 'scripts', 'src/js', 'src/fonts',
+    // the model tester's own source, and the one model it loads: the FBX and its
+    // three textures are 230 KB total, small enough to ship so the page still
+    // rebuilds on someone else's machine
+    'src/tester', 'src/assets/rebel'];
 const INCLUDE_FILES = ['vercel.json', 'package.json', 'package-lock.json', 'README.md',
     'DEPLOY.txt', 'START.bat'];
 

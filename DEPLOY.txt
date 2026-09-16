@@ -73,6 +73,12 @@ PLAYING / CONTROLS
 
   Modes: TEAM DEATHMATCH (5v5, respawns, first to 75) · ROUND CONTROL (3v3, one
   life per round, first to 3, spectate teammates in third person when you die) ·
+  In the two teamless modes there is no friendly side at all: everyone in the lobby
+  is hostile, marked red on the radar and shootable by you. A page for trying a
+  character model on its own (move / crouch / jump / shoot in an empty world) ships
+  alongside the game at /tester/ - rebuild it with `npm run tester`. It is a dev
+  tool, not part of a match, and it is marked noindex.
+
   FREE FOR ALL (8 solos, no teams, first to 200 kills - the bots fight each other
   too, and there are no killstreaks to shortcut it) · GUN GAME (four guns,
   M4A1 then MP5 then SPAS-12 then R700: every kill moves you up one gun, and so

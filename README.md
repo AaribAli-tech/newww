@@ -19,12 +19,18 @@ vercel.json             ← deploy config: static output + cache headers
 |---|---|---|---|
 | **Team Deathmatch** | 5v5 | first to 75 team kills, respawns on | UAV 4 · Airstrike 7 · Nuke 15 |
 | **Round Control** | 3v3 | one life per round, first to 3 rounds | UAV 4 · Airstrike 7, no nuke |
-| **Free For All** | none | 8 solos · first to **200 kills** — the bots race each other too | off, on purpose |
-| **Gun Game** | none | 4 rungs — M4A1 → MP5 → SPAS-12 → R700 — one kill each, finish first | off, on purpose |
+| **Free For All** | none — 8 solos, all hostile | first to **200 kills**; the bots race each other too | off, on purpose |
+| **Gun Game** | none — all hostile | 4 rungs — M4A1 → MP5 → SPAS-12 → R700 — one kill each, finish first | off, on purpose |
 
 Rules live in `src/js/modes.js`, one class per playlist. `main.js` never hard-codes a mode: it
 asks for `onKill`, `canRespawn`, `hudState()`, `standings()` and `result()`. A teamless mode
 sets `noTeams` and the scoreboard gives it one sorted table instead of two invented squads.
+
+`noTeams` also means there is no friendly side to hide behind: the roster is built entirely on the
+enemy team, so every soldier wears red, the radar marks everyone as hostile, and nothing in the lobby
+is shielded from your bullets by a team label. The player and the bots ask the same question before
+shooting — `Player.canShoot()` mirrors `Bot.isHostile()` — because those two disagreeing is how
+Free For All once ended up with three enemies you could look at but not hit.
 
 ## What a kill does
 
@@ -154,6 +160,26 @@ renders several passes per frame, and three resets `renderer.info` on every `ren
 overlay always reported `1 draws`. It now shows the true whole-frame totals — on this build,
 ~650-880 draw calls with 9 soldiers on a map batched down from 2112 meshes to 112.
 
+## Trying a model on its own (`/tester/`)
+
+`public/tester/` is a separate page — an empty world with a firing range, built from
+`src/tester/tester.js`, for judging a character rig before it goes anywhere near the game. Move,
+sprint, crouch, jump, shoot dummies; flip to first person or an inspect orbit; toggle the skeleton,
+wireframe, textures and the model's height. `npm run build` builds it, or run it alone with
+`npm run tester`, then open `/tester/`.
+
+It is wired to the **Modern Rebel Soldier** from `call-of-duty-asset-for-person`, which is a useful
+first patient: the file is a binary FBX with a `mixamorig:` skeleton and **no animation clips at
+all**, so every pose in the page (walk cycle, crouch bend, recoil) is produced procedurally from the
+movement state, and its texture paths are the author's own `C:\Users\...` — so the page rebinds
+`body.png` / `head.png` / `boots.png` by material name (`Body_Material`, `Head_Material`,
+`BootAndSkin_Material`) and shows you what it attached. Both facts are printed in the page's readout
+rather than hidden, because they are the things that will need deciding before this model ships in
+the game: it needs clips (or the game's procedural rig), and a GLB pass through the asset pipeline.
+
+To test a different model: drop the `.fbx` and its textures in `src/assets/rebel/`, name them in
+`ASSET` at the top of `src/tester/tester.js`, and rebuild.
+
 ## Checking a build
 
 ```bash
@@ -173,7 +199,7 @@ SwiftShader (this sandbox does) can take seconds per frame: a screenshot, a key/
 the reload that measures the repeat visit will report "could not be measured" instead of hanging the
 run, and budgets widen automatically on two-core boxes (or with `VERIFY_SLOW=1`).
 
-`npm run test:rules` needs no browser at all: 63 assertions over the medal chain, the streak
+`npm run test:rules` needs no browser at all: 67 assertions over the medal chain, the streak
 names, who is hostile to whom, both teamless modes' win conditions and the "one kill, one
 credit" rule. It runs in about a second, which is why the rules are worth testing there rather
 than in the page.

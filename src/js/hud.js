@@ -417,8 +417,11 @@ export class HUD {
         }
 
         const rounds = ms && ms.rounds;
+        const soloMode = !!((s.mode || this.mode) && (s.mode || this.mode).noTeams);
         this.el.roundPips.classList.toggle('on', !!rounds);
-        this.el.teamBars.classList.toggle('hidden', !!rounds);
+        // Two blue-vs-red bars would be a lie in a mode with no teams; the mode
+        // line already carries "ME 12 / 200" and the rival count.
+        this.el.teamBars.classList.toggle('hidden', !!rounds || soloMode);
 
         if (rounds) {
             const a = rounds.a | 0, b = rounds.b | 0;
@@ -549,11 +552,15 @@ export class HUD {
         // ── entities (screen space so icons stay upright-ish) ──
         const now = performance.now();
         const edge = MAP_R - 8;
+        // A teamless mode has no friendlies to draw blue, and no UAV will ever
+        // light the lobby up — killstreaks are off there — so without this the
+        // radar would show nothing but gunfire for the whole match.
+        const solo = !!player.allHostile;
         for (const b of bots) {
             if (!b.alive) continue;
-            const friendly = b.team === player.team;
+            const friendly = !solo && b.team === player.team;
             const flashed = now - (this.lastFireFlash.get(b) || -1e9) < 1800;
-            if (!friendly && !uav && !flashed) continue;
+            if (!friendly && !uav && !flashed && !solo) continue;
             const dx = (b.position.x - px) * MINI_SCALE, dz = (b.position.z - pz) * MINI_SCALE;
             const sx = half + dx * cs - dz * sn, sy = half + dx * sn + dz * cs;
             if (Math.hypot(sx - half, sy - half) > edge) continue;

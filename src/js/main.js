@@ -663,8 +663,15 @@ function startMatch() {
     const nA = gamemode.botsA, nB = gamemode.botsB;
     const namesA = shuffle(BOT_NAMES_A).slice(0, nA);
     const namesB = shuffle(BOT_NAMES_B).slice(0, nB);
+    // A mode with no teams must not have a "your team" at all. The roster is
+    // still split in two for names and spawn spread, but every soldier wears the
+    // enemy side — because the player's weapon skips same-team bodies (no
+    // friendly fire) and the radar paints them blue. Free For All used to keep
+    // three of the eight on your side, which is exactly the bunch you could
+    // neither hit nor spot.
+    const asEnemy = !!gamemode.noTeams;
     for (let i = 0; i < nA; i++) {
-        const b = new Bot(namesA[i], TEAM_A, scene, 0.34 + Math.random() * 0.3);
+        const b = new Bot(namesA[i], asEnemy ? TEAM_B : TEAM_A, scene, 0.34 + Math.random() * 0.3);
         b.spawn(); bots.push(b);
     }
     for (let i = 0; i < nB; i++) {
@@ -677,6 +684,9 @@ function startMatch() {
     warmShaders();
 
     player.resetMatch();
+    // The hitscan rule has to match the bots' (ai.js isHostile) or the two sides
+    // disagree about who is fair game; the mode owns that answer.
+    player.allHostile = asEnemy;
     player.respawn(randElement(SPAWN_A));
     player.sensitivity = 0.0016 * settings.sens;
     player.baseFov = settings.fov;
@@ -812,7 +822,7 @@ function handleBotEvents(bot, events) {
             if (d < 4) A.playGunshot(bot.weapon.audioType);
             else A.playGunshotDistant(bot.weapon.audioType, d);
             if (d < 30) effects.gunFlash(e.position);
-            if (bot.team !== TEAM_A) hud.noteEnemyFire(bot);
+            if (gamemode.noTeams || bot.team !== TEAM_A) hud.noteEnemyFire(bot);
         } else if (e.type === 'miss') {
             effects.tracer(e.from, e.to, 300);
             if (e.normal) effects.impact(e.to, e.normal, 'default');
@@ -1130,7 +1140,9 @@ function pickSafeSpawn() {
     for (const s of list) {
         let nearest = 1e9;
         for (const b of bots) {
-            if (!b.alive || b.team === TEAM_A) continue;
+            // In a solo mode everyone in the lobby is an enemy, so everyone is a
+            // reason to pick a different spawn.
+            if (!b.alive || (!gamemode.noTeams && b.team === TEAM_A)) continue;
             nearest = Math.min(nearest, Math.hypot(b.position.x - s.x, b.position.z - s.z));
         }
         if (nearest > bestD) { bestD = nearest; best = s; }

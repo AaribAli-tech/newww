@@ -13,7 +13,8 @@
     "og": "node scripts/make-og-image.mjs",
     "zip": "node scripts/make-deploy-zip.mjs",
     "check": "node scripts/vercel-build.mjs",
-    "test:rules": "node scripts/test-rules.mjs"
+    "test:rules": "node scripts/test-rules.mjs",
+    "tester": "node scripts/build-tester.mjs"
   },
   "devDependencies": {
     "@gltf-transform/core": "^4.1.1",

@@ -33,7 +33,8 @@ const OPTS = {
     watch: argv.includes('--watch'),
     force: argv.includes('--force'),
     minify: !argv.includes('--no-minify'),
-    sourcemap: argv.includes('--sourcemap')
+    sourcemap: argv.includes('--sourcemap'),
+    quiet: argv.includes('--quiet')
 };
 
 const log = (...a) => process.stdout.write(a.join(' ') + '\n');
@@ -335,6 +336,11 @@ async function build() {
     const htmlOut = await buildHTML(html, js, css);
     html = null;
     log(`   index.html (${kb(htmlOut.bytes)})`);
+
+    // The model tester is a separate page with its own bundle; it is built here so
+    // `npm run build` (and therefore a Vercel deploy) always ships a current one.
+    try { const { buildTester } = await import('./build-tester.mjs'); await buildTester({ quiet: OPTS.quiet }); }
+    catch (e) { log('   ! tester build skipped: ' + (e && e.message || e)); }
 
     log('\n 5/5 shell extras');
     const extras = (await buildIcons()).concat(assets);

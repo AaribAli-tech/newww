@@ -32,6 +32,7 @@ const MIME = {
     '.avif': 'image/avif',
     '.svg': 'image/svg+xml',
     '.glb': 'model/gltf-binary',
+    '.fbx': 'application/octet-stream',
     '.gltf': 'model/gltf+json',
     '.bin': 'application/octet-stream',
     '.ico': 'image/x-icon',
@@ -48,7 +49,7 @@ function cacheFor(ext, rel) {
     if (rel === 'sw.js') return 'no-cache, no-store, must-revalidate';
     if (rel === 'index.html') return 'public, max-age=0, must-revalidate';
     if (rel === 'manifest.webmanifest') return 'public, max-age=3600, must-revalidate';
-    if (ext === '.js' && rel.startsWith('js/')) return 'public, max-age=31536000, immutable';
+    if (ext === '.js' && /(^|\/)js\//.test(rel)) return 'public, max-age=31536000, immutable';
     if (ext === '.woff2') return 'public, max-age=31536000, immutable';
     if (ext === '.css') return 'public, max-age=31536000, immutable';
     return 'public, max-age=604800, stale-while-revalidate=86400';
@@ -68,6 +69,15 @@ async function resolveFile(urlPath) {
     if (!full.startsWith(SITE + path.sep) && full !== SITE) return null;
     const st = await fs.stat(full).catch(() => null);
     if (st && st.isFile()) return { rel, full, size: st.size, mtimeMs: st.mtimeMs };
+    // a folder serves its index.html, which is what Vercel does too — this is how
+    // /tester/ (the model sandbox page) resolves.
+    if (st && st.isDirectory()) {
+        const idx = path.join(full, 'index.html');
+        const st3 = await fs.stat(idx).catch(() => null);
+        if (st3 && st3.isFile()) {
+            return { rel: rel.replace(/\/+$/, '') + '/index.html', full: idx, size: st3.size, mtimeMs: st3.mtimeMs };
+        }
+    }
     // clean URLs: /foo → /foo.html
     if (!path.extname(rel)) {
         const alt = full + '.html';

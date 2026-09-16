@@ -346,6 +346,12 @@ const kills = await race('the kill-feedback checks', () => page.evaluate(async (
         noTeams: ffa.noTeams === true,
         target: ffa.target,
         allBotsHostile: G.bots.every(b => b.allHostile === true),
+        // The bug this is here to keep dead: with the old roster split, a third
+        // of the lobby shared the player's team, which made them both invisible
+        // on the radar and immune to the player's bullets.
+        nobodyOnYourTeam: G.bots.every(b => b.team !== G.player.team),
+        everyBotShootable: G.bots.every(b => G.player.canShoot(b)),
+        teamBarsHidden: document.getElementById('teamBars').classList.contains('hidden'),
         bothSpawnHalves: G.bots.every(b => (b.spawnPoints || []).length > 8),
         streakColHidden: document.getElementById('streakCol').classList.contains('hidden'),
         hud: txt('#modePrimary') || txt('#timer'),
@@ -377,6 +383,8 @@ const kills = await race('the kill-feedback checks', () => page.evaluate(async (
         rungBefore, rungAfter: p._ggRung | 0,
         gunBefore, gunAfter: p.current,
         botsClimbToo: G.bots.some(b => (b._ggRung | 0) >= 0 && b.weaponIndex >= 0),
+        nobodyOnYourTeam: G.bots.every(b => b.team !== G.player.team),
+        everyBotShootable: G.bots.every(b => G.player.canShoot(b)),
         state: G.state
     };
 
@@ -403,10 +411,13 @@ if (kills.error) {
     log(`\n kill feedback     ${kills.medals.length ? kills.medals.join(' + ') : 'no medals rendered'}` +
         ` · feed ${kills.feedRows} row(s) · streak ${kills.streakText || 'off'}`);
     log(` free for all      ${kills.ffa.name} · ${kills.ffa.target} kills · hostile to all: ` +
-        `${kills.ffa.allBotsHostile} · streaks hidden: ${kills.ffa.streakColHidden} · ${kills.ffa.hud}`);
+        `${kills.ffa.allBotsHostile} · no friendlies in the lobby: ${kills.ffa.nobodyOnYourTeam}` +
+        ` · every bot shootable: ${kills.ffa.everyBotShootable} · team bars: ` +
+        `${kills.ffa.teamBarsHidden ? 'hidden' : 'shown'} · streaks hidden: ${kills.ffa.streakColHidden} · ${kills.ffa.hud}`);
     log(` round control     opens on round ${kills.ctl && kills.ctl.round} · one life: ${kills.ctl && kills.ctl.oneLife}`);
     log(` gun game          ${kills.gun.rungs} rungs · your kill moved rung ` +
-        `${kills.gun.rungBefore + 1} → ${kills.gun.rungAfter + 1} · weapon ${kills.gun.gunBefore} → ${kills.gun.gunAfter}`);
+        `${kills.gun.rungBefore + 1} → ${kills.gun.rungAfter + 1} · weapon ${kills.gun.gunBefore} → ${kills.gun.gunAfter}` +
+        ` · no friendlies: ${kills.gun.nobodyOnYourTeam} · shootable: ${kills.gun.everyBotShootable}`);
 }
 const MEDALS = ['KILL', 'DOUBLE KILL', 'TRIPLE KILL', 'HEADSHOT'];
 const killsOk = !kills.error &&
@@ -414,6 +425,9 @@ const killsOk = !kills.error &&
     kills.feedRows >= 3 && kills.streakOn && kills.streak === kills.before.streak + 3 &&
     kills.ffa.noTeams === true && kills.ffa.target === 200 && kills.ffa.allBotsHostile === true &&
     kills.ffa.streakColHidden === true && kills.ffa.state === 'playing' && kills.ffa.scoreMoved === true &&
+    kills.ffa.nobodyOnYourTeam === true && kills.ffa.everyBotShootable === true &&
+    kills.ffa.teamBarsHidden === true && kills.gun.nobodyOnYourTeam === true &&
+    kills.gun.everyBotShootable === true &&
     kills.ffa.modeReady === true &&
     kills.gun.rungs === 4 && kills.gun.rungAfter === kills.gun.rungBefore + 1 &&
     kills.gun.gunAfter !== kills.gun.gunBefore && kills.gun.state === 'playing' &&
