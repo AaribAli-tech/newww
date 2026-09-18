@@ -8,8 +8,7 @@
 // soldier exactly backwards.)
 // ============================================================================
 import * as THREE from 'three';
-import { SoldierRig } from './soldier.js';
-import { AnimatedSoldier, charactersReady } from './character.js';
+import { rigFor } from './rebel.js';
 // Bots draw from the four-weapon TDM pool, NOT the whole 15-gun Gun Game
 // ladder — that ladder contains a 165-damage Barrett that would one-shot the
 // player from across the map. Gun Game overrides this per bot via weaponPool.
@@ -76,9 +75,10 @@ export class Bot {
         // Skinned GLB soldier when the assets loaded, procedural rig otherwise.
         // Both expose the same interface, so nothing below this line cares
         // which one it got — and a missing asset costs looks, not a crash.
-        this.rig = charactersReady()
-            ? new AnimatedSoldier(team, this.weapon.type)
-            : new SoldierRig(team, this.weapon.type, (Math.random() * 5) | 0);
+        // character.js's GLB soldiers, soldier.js's procedural rig, or the imported
+        // FBX model from rebel.js — all the same surface, so nothing below this
+        // line has to know which one it got.
+        this.rig = rigFor(team, this.weapon.type);
         scene.add(this.rig.root);
         this.mesh = this.rig.root;
 
@@ -186,7 +186,13 @@ export class Bot {
      * on you.
      */
     isHostile(e) {
-        if (!e || !e.alive) return false;
+        // `e === this` is not a rounding detail. In a teamless mode "everyone is
+        // hostile" would otherwise include the self, the bot acquires its own
+        // position as its target, and the distance is 0 — so the engage maths
+        // divides by zero, velocity goes NaN, position goes NaN, and the soldier
+        // silently disappears: unrenderable, unhittable, and unable to kill or be
+        // killed. One poisoned bot stalled the whole Free For All.
+        if (!e || !e.alive || e === this) return false;
         return this.allHostile || e.team !== this.team;
     }
 
@@ -242,10 +248,11 @@ export class Bot {
         this.eyePos(_a);
         const fwdX = -Math.sin(this.yaw), fwdZ = -Math.cos(this.yaw);
         for (const e of entities) {
-            if (!this.isHostile(e)) continue;
+            if (!this.isHostile(e) || e === this) continue;
             const dx = e.position.x - this.position.x, dz = e.position.z - this.position.z;
             const d = Math.hypot(dx, dz);
-            if (d > VIEW_RANGE) continue;
+            if (d > VIEW_RANGE || d < 0.25) continue;   // stacked on / inside you is not a target
+            if (!Number.isFinite(d)) continue;
             const dot = (dx * fwdX + dz * fwdZ) / (d || 1);
             const alerted = this.suppressed > 0 || (this.enemy === e && this.lastSeenTime > -1);
             if (dot < FOV_DOT && !alerted && d > 5) continue;
@@ -258,8 +265,32 @@ export class Bot {
     }
 
     // ── update ──────────────────────────────────────────────────────────────
+    /**
+     * True once physics has gone non-finite. A NaN position never repairs itself —
+     * every later frame only adds to it — so the soldier is invisible, unhittable
+     * and unable to shoot for the rest of the match, which is what a lone divide by
+     * zero used to cost.
+     */
+    needsHeal() {
+        return !Number.isFinite(this.position.x) || !Number.isFinite(this.position.z)
+            || !Number.isFinite(this.velocity.x) || !Number.isFinite(this.velocity.z);
+    }
+
+    /** Put a poisoned soldier back on the map. A hiccup, not a broken mode. */
+    selfHeal() {
+        const sp = randElement(this.spawnPoints && this.spawnPoints.length
+            ? this.spawnPoints : (this.team === TEAM_A ? SPAWN_A : SPAWN_B));
+        this.position.set(sp.x, 0, sp.z);
+        this.velocity.set(0, 0, 0);
+        this.goal = null;
+        this.enemy = null;
+        this.pickGoal();
+    }
+
     update(dt, now, entities, cw, viewer) {
         this.events.length = 0;
+
+        if (this.needsHeal()) this.selfHeal();
 
         if (!this.alive) {
             this.rig.update(dt, {});
@@ -543,6 +574,13 @@ export class Bot {
                 type: 'miss', from: muzzle, to: h ? h.point : muzzle.clone().addScaledVector(dir, w.range),
                 normal: h ? h.normal : null, shooter: this, near: enemy
             });
+        }
+        // A muzzle sampled before the rig has written its world matrices can come
+        // back non-finite (it is read straight out of matrixWorld). Rebuild it from
+        // the eye — the point the shot was traced from — rather than hand the frame
+        // a NaN that takes the audio path down with it.
+        if (!Number.isFinite(muzzle.x) || !Number.isFinite(muzzle.y) || !Number.isFinite(muzzle.z)) {
+            this.eyePos(muzzle);
         }
         this.events.push({ type: 'shot', audio: w.audioType, position: muzzle.clone() });
     }

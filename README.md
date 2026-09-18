@@ -160,6 +160,57 @@ renders several passes per frame, and three resets `renderer.info` on every `ren
 overlay always reported `1 draws`. It now shows the true whole-frame totals — on this build,
 ~650-880 draw calls with 9 soldiers on a map batched down from 2112 meshes to 112.
 
+## The imported character model (and how to switch it)
+
+`src/assets/rebel/` holds the **Modern Rebel Soldier** FBX from
+`call-of-duty-asset-for-person`, and `src/js/rebel.js` turns it into a bot rig with the same surface
+as the other two — `root`, `muzzle`, `setWeapon`, `update(dt, state)`, `fireFlash`, `startDeath`,
+`resetPose`, `setOpacity`, `setShadows`, `dispose` — so `ai.js` builds a soldier through `rigFor()`
+and never has to know which one it got.
+
+| URL | Who wears the model |
+|---|---|
+| *(default)* | nobody yet — the game keeps its own soldiers while the model is being judged |
+| `?rebel=enemy` | the enemy team, so a match shows both rigs side by side |
+| `?rebel=all` | every bot, on both teams |
+| `?rebel=off` | the same as the default, spelled out |
+
+The default is `off` on purpose: the model is signed off on `/tester/` first, and one line in
+`src/js/rebel.js` (`DEFAULT_MODE`) makes it the shipped look afterwards. Free For All and Gun Game
+put the whole lobby on the enemy side, so `?rebel=enemy` there already means everyone.
+
+If the FBX is missing or fails to parse, `loadRebel()` resolves false and the game carries on with
+the rigs it already had — an asset problem costs looks, not a match.
+
+Two things about the file itself needed measuring rather than assuming, and both live in
+`src/js/rebel-pose.js` so the game and the test page cannot drift apart:
+
+* **It is bound upside-down inside its own rest pose.** With every bone at rotation 0 the hip→knee,
+  knee→ankle and shoulder→elbow offsets all point at `+Y`: 14 of its 15 meshes are rigid parts
+  parented to bones (only `body_Cube` is skinned), so a soldier at rest is an arms-up ragdoll and a
+  walk cycle played on top of it looks like surrender. `STAND_FLIP` puts half a turn about X under
+  the four root limb bones — same axis the animation uses, which is why a positive angle still swings
+  a limb forward and a knee still bends backwards (both measured on the rig, not guessed).
+* **Its height has to be taken from what gets drawn.** The loader's box says 154 units; the same rig
+  rendered measures 292, because the file's pivot offsets only settle once the first matrices are
+  composed. Scaling from the loader's number puts a 1.80 m soldier in the match at nearly 3.5 m. Both
+  pages therefore size from the rendered box: `fitFactor()` is applied over a few frames and then
+  stops, and the bot rig writes its correction to the shared template once so later soldiers are
+  right on their first frame.
+
+What the model cannot do yet, in one line each: it has **no animation clips** (the export has no
+AnimationStack), so locomotion, crouch and the death fall are generated procedurally from the bot's
+own speed and aim — readable, but a step below the GLB soldiers' canned clips until real clips are
+authored or the existing `anim_*.glb` are retargeted onto its `mixamorig:` skeleton (a matching bone
+set, so that is feasible); and its 15 skinned pieces are **not merged**, which costs about 120 extra
+draw calls across a full lobby — merging skinned geometry has to agree with every piece's bind
+matrix, and guessing wrong shows up as a twitching soldier, so that trade is deliberately deferred.
+
+Its textures are rebound by material name (`Body_Material`, `Head_Material`, `BootAndSkin_Material`)
+because the paths baked into the file are the author's own `C:\Users\...`, and a small team-coloured
+shoulder patch is added, because a soldier nobody can assign to a side is how "enemies I can't hit"
+got reported in the first place.
+
 ## Trying a model on its own (`/tester/`)
 
 `public/tester/` is a separate page — an empty world with a firing range, built from
@@ -167,6 +218,15 @@ overlay always reported `1 draws`. It now shows the true whole-frame totals — 
 sprint, crouch, jump, shoot dummies; flip to first person or an inspect orbit; toggle the skeleton,
 wireframe, textures and the model's height. `npm run build` builds it, or run it alone with
 `npm run tester`, then open `/tester/`.
+
+The model is on you **and on all seven range dummies**: when the FBX and its textures are ready, the
+page clones it (`SkeletonUtils.clone`, which is the only safe way to copy a skinned hierarchy) and
+dresses the range, each copy on a slow patrol so the walk cycle can be judged from the front, the
+back and both sides at once. `K` swaps the dummies back to the crude boxes — the boxes leave the
+scene when the model arrives, because three's raycaster does not skip invisible objects, so a shot
+that scores has to hit the actual mesh; head shots still count (the head is found by material name).
+The readout in the corner reports what it loaded, which textures it attached, how tall it is drawing,
+and whether the clones are on the range.
 
 It is wired to the **Modern Rebel Soldier** from `call-of-duty-asset-for-person`, which is a useful
 first patient: the file is a binary FBX with a `mixamorig:` skeleton and **no animation clips at

@@ -73,8 +73,11 @@ export async function buildTester({ quiet = false } = {}) {
 
     // 3. the page, with the hashed script tag pointed at it
     let html = await fs.readFile(path.join(SRC, SUB, 'index.html'), 'utf8');
+    // no leading slash: the same folder has to work under /tester/ and at the
+    // root of a standalone server (see ASSET in tester.js)
+    const local = jsName.replace(SUB + '/', '');
     html = html.replace('<!--TESTER_SCRIPT-->',
-        `<link rel="modulepreload" href="/${jsName}">\n<script type="module" src="/${jsName}"></script>`);
+        `<link rel="modulepreload" href="${local}">\n<script type="module" src="${local}"></script>`);
     if (html.includes('<!--TESTER_SCRIPT-->')) throw new Error('no <!--TESTER_SCRIPT--> placeholder in src/tester/index.html');
     out.push(await write(`${SUB}/index.html`, html));
 

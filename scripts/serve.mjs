@@ -14,7 +14,9 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
-const SITE = path.join(ROOT, 'public');
+const SITE = process.env.SITE_DIR
+    ? path.resolve(ROOT, process.env.SITE_DIR)      // a subfolder as its own site
+    : path.join(ROOT, 'public');
 const PORT = Number(process.argv[2] || process.env.PORT || 8420);
 
 const MIME = {
@@ -72,6 +74,9 @@ async function resolveFile(urlPath) {
     // a folder serves its index.html, which is what Vercel does too — this is how
     // /tester/ (the model sandbox page) resolves.
     if (st && st.isDirectory()) {
+        // Redirect, do not serve: a page with relative asset paths resolves them
+        // against the URL it was reached at, so /tester must become /tester/.
+        if (!rel.endsWith('/')) return { redirect: rel.replace(/\/+$/, '') + '/' };
         const idx = path.join(full, 'index.html');
         const st3 = await fs.stat(idx).catch(() => null);
         if (st3 && st3.isFile()) {
@@ -108,6 +113,11 @@ const server = createServer(async (req, res) => {
     const t0 = Date.now();
     try {
         const entry = await resolveFile(req.url);
+        if (entry && entry.redirect) {
+            res.writeHead(301, { Location: entry.redirect, 'Cache-Control': 'no-store' });
+            res.end();
+            return;
+        }
         if (!entry) {
             res.writeHead(404, { 'Content-Type': 'text/plain; charset=utf-8', 'Cache-Control': 'no-store' });
             res.end('Not found\n');

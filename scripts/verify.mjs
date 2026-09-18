@@ -306,7 +306,9 @@ await attempt('the shooting/keybind exercise', () => page.evaluate(async () => {
 // the parts that only exist in a running page: the medal stack, the streak strip,
 // and the fact that a *player* kill reaches the mode at all — which is the bug
 // that would have shipped Gun Game unwinnable and Free For All unwinnable-by-you.
-const kills = await race('the kill-feedback checks', () => page.evaluate(async () => {
+// SLOW is a Node-side number: an evaluate body cannot see it, so the wait budget is
+// passed in as an argument instead of being read off the closure.
+const kills = await race('the kill-feedback checks', () => page.evaluate(async (budget) => {
     const G = window.__nuketown;
     const txt = s => ((document.querySelector(s) || {}).textContent || '').replace(/\s+/g, ' ').trim();
     const p = G.player;
@@ -314,7 +316,7 @@ const kills = await race('the kill-feedback checks', () => page.evaluate(async (
     // startMatch keeps working after it returns (roster, spawn, mode hand-off),
     // so wait for the state to say so rather than counting frames — a frame can
     // take seconds under a software rasteriser and a fixed wait just races it.
-    const until = async (fn, ms = SLOW ? 120000 : 15000) => {
+    const until = async (fn, ms = budget) => {
         const t0 = Date.now();
         for (;;) {
             if (fn()) return true;
@@ -350,6 +352,9 @@ const kills = await race('the kill-feedback checks', () => page.evaluate(async (
         // of the lobby shared the player's team, which made them both invisible
         // on the radar and immune to the player's bullets.
         nobodyOnYourTeam: G.bots.every(b => b.team !== G.player.team),
+        // a soldier with a non-finite position is invisible and unhittable — that
+        // is literally how "the enemies can't be seen" happened in Free For All
+        allOnTheMap: G.bots.every(bb => Number.isFinite(bb.position.x) && Number.isFinite(bb.position.z)),
         everyBotShootable: G.bots.every(b => G.player.canShoot(b)),
         teamBarsHidden: document.getElementById('teamBars').classList.contains('hidden'),
         bothSpawnHalves: G.bots.every(b => (b.spawnPoints || []).length > 8),
@@ -384,6 +389,9 @@ const kills = await race('the kill-feedback checks', () => page.evaluate(async (
         gunBefore, gunAfter: p.current,
         botsClimbToo: G.bots.some(b => (b._ggRung | 0) >= 0 && b.weaponIndex >= 0),
         nobodyOnYourTeam: G.bots.every(b => b.team !== G.player.team),
+        // a soldier with a non-finite position is invisible and unhittable — that
+        // is literally how "the enemies can't be seen" happened in Free For All
+        allOnTheMap: G.bots.every(bb => Number.isFinite(bb.position.x) && Number.isFinite(bb.position.z)),
         everyBotShootable: G.bots.every(b => G.player.canShoot(b)),
         state: G.state
     };
@@ -403,7 +411,7 @@ const kills = await race('the kill-feedback checks', () => page.evaluate(async (
     document.querySelector('#modePick .mode[data-id=\"tdm\"]').click();
     await G.startMatch();
     return out;
-}), SLOW ? 260000 : 120000) || { error: 'not measured' };
+}, SLOW ? 120000 : 15000), SLOW ? 260000 : 120000) || { error: 'not measured' };
 
 if (kills.error) {
     log(`\n kills/modes       could not be measured (${kills.error})`);
@@ -412,7 +420,8 @@ if (kills.error) {
         ` · feed ${kills.feedRows} row(s) · streak ${kills.streakText || 'off'}`);
     log(` free for all      ${kills.ffa.name} · ${kills.ffa.target} kills · hostile to all: ` +
         `${kills.ffa.allBotsHostile} · no friendlies in the lobby: ${kills.ffa.nobodyOnYourTeam}` +
-        ` · every bot shootable: ${kills.ffa.everyBotShootable} · team bars: ` +
+        ` · every bot shootable: ${kills.ffa.everyBotShootable} · all on the map: ` +
+        `${kills.ffa.allOnTheMap} · team bars: ` +
         `${kills.ffa.teamBarsHidden ? 'hidden' : 'shown'} · streaks hidden: ${kills.ffa.streakColHidden} · ${kills.ffa.hud}`);
     log(` round control     opens on round ${kills.ctl && kills.ctl.round} · one life: ${kills.ctl && kills.ctl.oneLife}`);
     log(` gun game          ${kills.gun.rungs} rungs · your kill moved rung ` +
@@ -426,6 +435,7 @@ const killsOk = !kills.error &&
     kills.ffa.noTeams === true && kills.ffa.target === 200 && kills.ffa.allBotsHostile === true &&
     kills.ffa.streakColHidden === true && kills.ffa.state === 'playing' && kills.ffa.scoreMoved === true &&
     kills.ffa.nobodyOnYourTeam === true && kills.ffa.everyBotShootable === true &&
+    kills.ffa.allOnTheMap === true && kills.gun.allOnTheMap === true &&
     kills.ffa.teamBarsHidden === true && kills.gun.nobodyOnYourTeam === true &&
     kills.gun.everyBotShootable === true &&
     kills.ffa.modeReady === true &&

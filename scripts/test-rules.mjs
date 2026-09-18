@@ -13,6 +13,8 @@ import { MODES, createMode } from '../src/js/modes.js';
 import { GUN_GAME_LADDER, WEAPON_DEFS } from '../src/js/weapons.js';
 import { SPAWN_A, SPAWN_B } from '../src/js/map.js';
 import { TEAM_A, TEAM_B } from '../src/js/utils.js';
+import { readFile } from 'node:fs/promises';
+import { STAND_FLIP, ARMS, TARGET_HEIGHT, fitFactor } from '../src/js/rebel-pose.js';
 
 let pass = 0, fail = 0;
 const ok = (name, cond, detail = '') => {
@@ -77,6 +79,31 @@ group('ai.js — hostility');
         t({ team: TEAM_A, allHostile: true }, { team: TEAM_A, alive: true }) === true);
     ok('nobody shoots a corpse', t({ team: TEAM_A, allHostile: true }, { team: TEAM_B, alive: false }) === false);
     ok('and nobody shoots the air', t({ team: TEAM_A }, null) === false);
+
+    // "everyone is hostile" has to mean everyone ELSE. When it included the self,
+    // a bot targeted its own position, divided by a distance of 0, and rode the
+    // resulting NaN off the map — invisible and untouchable.
+    const me = { team: TEAM_A, allHostile: true, alive: true };
+    ok('a soldier is never hostile to himself, even with no teams', t(me, me) === false);
+    ok('the same body under two references is still himself',
+        t({ team: TEAM_A, allHostile: true }, me) === true, 'a different soldier must stay valid');
+
+    const { Bot } = await import('../src/js/ai.js');
+    const healable = {
+        position: { x: NaN, z: 4, set(x, y, z) { this.x = x; this.z = z; } },
+        velocity: { x: NaN, z: 0, set(x, y, z) { this.x = x; this.z = z; } },
+        team: TEAM_A, spawnPoints: [{ x: -11, z: 7 }], goal: 'stale', enemy: 'stale',
+        pickGoal() { this.goal = 'fresh'; }
+    };
+    ok('a non-finite transform is detected', Bot.prototype.needsHeal.call(healable) === true);
+    Bot.prototype.selfHeal.call(healable);
+    ok('and repaired: back on the map, aiming at nothing',
+        healable.position.x === -11 && healable.velocity.x === 0
+        && healable.enemy === null && healable.goal === 'fresh'
+        && Bot.prototype.needsHeal.call(healable) === false);
+    ok('a healthy soldier is left alone', Bot.prototype.needsHeal.call({
+        position: { x: 1, z: 2 }, velocity: { x: 0, z: 0 }
+    }) === false);
 }
 
 // ── 3. the modes ─────────────────────────────────────────────────────────────
@@ -274,6 +301,43 @@ group('modes.js — no regressions in the two team modes');
     ok('Free For All and Gun Game still own their primary line',
         /^ME \d+ \/ 200$/.test(createMode('ffa', ctx).hudState().primary) &&
         /^\d+ \/ \d+$/.test(createMode('gun', ctx).hudState().primary));
+}
+
+// ── 8. the imported FBX: standing pose and the sizing fit ────────────────────
+// The model file is bound wrong (limbs folded up along the body), so two numbers
+// decide whether it looks like a soldier: the standing flip underneath every
+// animation angle, and the scale correction taken from what the page drew rather
+// than what the loader reported. Both live in one module the game and the tester
+// share, and both are plain arithmetic — so they are testable here, in Node.
+group('rebel-pose.js — the FBX calibration both pages share');
+{
+    const src = await readFile(new URL('../src/js/rebel-pose.js', import.meta.url), 'utf8');
+    ok('the pose table is its own module, so the game and the tester cannot drift',
+        /STAND_FLIP/.test(src) && !/document\.|WebGLRenderer/.test(src), src.split('\n')[0].slice(0, 40));
+
+    ok('the flip covers exactly the four limb roots, and nothing else',
+        Object.keys(STAND_FLIP).join(',') === 'LeftUpLeg,RightUpLeg,LeftArm,RightArm',
+        Object.keys(STAND_FLIP).join(','));
+    ok('each one is half a turn about X', Object.values(STAND_FLIP).every(v => Math.abs(v - Math.PI) < 1e-9));
+    ok('a soldier is 1.80 m', Math.abs(TARGET_HEIGHT - 1.8) < 1e-9);
+
+    // the fit: a rig that drew the file's bound height is nearly twice too big
+    ok('a 3.42 m drawing of a 1.80 m soldier is shrunk, not left alone',
+        Math.abs(fitFactor(3.42) - 1.8 / 3.42) < 1e-9, fitFactor(3.42).toFixed(4));
+    ok('something already within 2% is left exactly alone', fitFactor(1.82) === 1 && fitFactor(1.78) === 1);
+    ok('a junk measurement never rescales the rig', fitFactor(0) === 0 && fitFactor(NaN) === 0 && fitFactor(-3) === 0);
+    ok('the aim pose is forward, not up: positive angles, both hands in front',
+        ARMS.aim.leftArm > 0 && ARMS.aim.rightArm > 0 && ARMS.elbow > 0, JSON.stringify(ARMS.aim));
+
+    // and both consumers actually use it
+    const rebel = await readFile(new URL('../src/js/rebel.js', import.meta.url), 'utf8');
+    const tester = await readFile(new URL('../src/tester/tester.js', import.meta.url), 'utf8');
+    ok('the bot rig adds the flip under every animated bone',
+        /b\.rotation\.x \+= \(g\.x \+ \(STAND_FLIP\[name\] \|\| 0\)/.test(rebel));
+    ok('the bot rig sizes itself from what it drew, once, and shares the fit',
+        /fitFactor\(h\)/.test(rebel) && /if \(!S\.calibrated\)/.test(rebel));
+    ok('the test page dresses its range with clones of the model',
+        /cloneRig\(rig\.group\)/.test(tester) && /userData\.part = isHead \? 'head' : 'body'/.test(tester));
 }
 
 console.log(`\n${fail === 0 ? '✓' : '✗'} ${pass} passed, ${fail} failed\n`);

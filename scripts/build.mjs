@@ -68,6 +68,28 @@ async function cleanOut() {
 }
 
 // ── 1. assets ───────────────────────────────────────────────────────────────
+// The imported character model (src/assets/rebel) is an FBX plus three PNGs that
+// three's FBXLoader reads directly in the browser. It skips the GLB optimiser on
+// purpose: there is nothing to convert, and re-encoding a 230 KB download that is
+// already smaller than the GLB of the same mesh would only risk breaking it.
+const REBEL_MAP = {
+    'rebel.fbx': 'rebel.fbx',
+    'body.png': 'BodyTexture.png',
+    'head.png': 'HeadTexture.png',
+    'boots.png': 'BootsAndSkinTexture.png'
+};
+async function copyRebel() {
+    const from = path.join(SRC, 'assets', 'rebel');
+    const written = [];
+    for (const [src, dst] of Object.entries(REBEL_MAP)) {
+        const p = path.join(from, src);
+        if (!await exists(p)) continue;
+        written.push(await writeOut(`assets/characters/${dst}`, await fs.readFile(p)));
+    }
+    if (!written.length) log('   ! no model in src/assets/rebel — rebel rig disabled');
+    return written;
+}
+
 async function copyAssets() {
     const written = [];
     for (const dir of ['textures', 'models']) {
@@ -321,7 +343,7 @@ async function build() {
 
     log('\n 1/5 assets');
     await optimizeAssets({ force: OPTS.force, quiet: false });
-    const assets = await copyAssets();
+    const assets = (await copyAssets()).concat(await copyRebel());
 
     log('\n 2/5 javascript');
     const js = await bundleJS();

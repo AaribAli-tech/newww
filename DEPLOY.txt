@@ -73,11 +73,22 @@ PLAYING / CONTROLS
 
   Modes: TEAM DEATHMATCH (5v5, respawns, first to 75) · ROUND CONTROL (3v3, one
   life per round, first to 3, spectate teammates in third person when you die) ·
+  THE IMPORTED MODEL: bots can wear the "Modern Rebel Soldier" FBX (see
+  src/js/rebel.js). Default is OFF while the model is being judged on /tester/;
+  ?rebel=enemy puts it on the opposing team, ?rebel=all on every bot. It has no
+  animation clips of its own, so its walk/crouch/death are procedural, and the
+  file is bound with its limbs folded up along the body, so a standing flip and a
+  rendered-box scale live in src/js/rebel-pose.js (shared with the tester page).
+  The game runs fine either way, and if the model file is missing the normal
+  soldiers are used without a message.
+
   In the two teamless modes there is no friendly side at all: everyone in the lobby
   is hostile, marked red on the radar and shootable by you. A page for trying a
   character model on its own (move / crouch / jump / shoot in an empty world) ships
-  alongside the game at /tester/ - rebuild it with `npm run tester`. It is a dev
-  tool, not part of a match, and it is marked noindex.
+  alongside the game at /tester/ - rebuild it with `npm run tester`. The model is
+  worn by the player and cloned onto all seven range dummies (K swaps them back to
+  boxes), so the rig can be judged from every side at once. It is a dev tool, not
+  part of a match, and it is marked noindex.
 
   FREE FOR ALL (8 solos, no teams, first to 200 kills - the bots fight each other
   too, and there are no killstreaks to shortcut it) · GUN GAME (four guns,

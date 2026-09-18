@@ -88,7 +88,21 @@ function noiseBuf(seconds) {
     return b;
 }
 
+/**
+ * WebAudio rejects a non-finite value with a throw, and these calls happen inside
+ * the per-frame event loop — one bad number used to abandon the rest of that
+ * bot's events, including the hit it had just landed. So every parameter is
+ * clamped here rather than trusted at the call site: a silent sound is a much
+ * cheaper failure than a dropped shot.
+ */
+const sane = (v, min, max, dflt) => (Number.isFinite(v) ? Math.min(max, Math.max(min, v)) : dflt);
+
 function noise(dur, vol, lp = 6000, hp = 120, sendVerb = 0.25, curve = 3) {
+    dur = sane(dur, 0.01, 4, 0.1);
+    vol = sane(vol, 0.0002, 1, 0.15);
+    lp = sane(lp, 20, 20000, 6000);
+    hp = sane(hp, 10, 18000, 120);
+    curve = sane(curve, 0.2, 8, 3);
     init();
     const src = ctx.createBufferSource();
     src.buffer = noiseBuf(dur);
@@ -106,6 +120,10 @@ function noise(dur, vol, lp = 6000, hp = 120, sendVerb = 0.25, curve = 3) {
 }
 
 function tone(freq, dur, vol, type = 'sine', slideTo = null, sendVerb = 0.1, delay = 0) {
+    freq = sane(freq, 10, 20000, 440);
+    dur = sane(dur, 0.01, 4, 0.1);
+    vol = sane(vol, 0.0002, 1, 0.1);
+    if (slideTo !== null) slideTo = sane(slideTo, 10, 20000, null);
     init();
     const t = ctx.currentTime + delay;
     const o = ctx.createOscillator();
@@ -123,6 +141,9 @@ function tone(freq, dur, vol, type = 'sine', slideTo = null, sendVerb = 0.1, del
 }
 
 function click(freq, dur, vol, delay = 0) {
+    freq = sane(freq, 20, 20000, 1200);
+    dur = sane(dur, 0.01, 2, 0.05);
+    vol = sane(vol, 0.0002, 1, 0.1);
     init();
     const t = ctx.currentTime + delay;
     const src = ctx.createBufferSource();
@@ -165,7 +186,7 @@ export function playGunshot(type = 'rifle') {
 /** Distant/enemy gunfire — thinner, more tail. */
 export function playGunshotDistant(type = 'rifle', distance = 20) {
     init();
-    const att = Math.max(0.06, 1 - distance / 55);
+    const att = Math.max(0.06, 1 - sane(distance, 0, 400, 20) / 55);
     noise(0.05, 0.16 * att, 2600 - distance * 22, 90, 0.7, 1.6);
     tone(70, 0.14, 0.10 * att, 'sine', 34, 0.5);
     void type;

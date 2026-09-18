@@ -8,6 +8,7 @@ import { ViewModel } from './viewmodel.js';
 import { Player } from './player.js';
 import { Bot } from './ai.js';
 import { HUD } from './hud.js';
+import { loadRebel, rebelInfo, setRebelMode } from './rebel.js';
 import { Effects } from './effects.js';
 import { Killstreaks } from './killstreaks.js';
 import { KillChain, milestoneFor, milestoneProgress } from './medals.js';
@@ -190,7 +191,8 @@ async function loadCharacters() {
     // model rather than failing the boot.
     await Promise.all([
         characterAssets.load('assets/models/'),
-        vmAssets.load('assets/models/')
+        vmAssets.load('assets/models/'),
+        loadRebel()
     ]);
 }
 
@@ -372,6 +374,9 @@ function finishBoot() {
         // one frame of the spectator camera, callable without rendering —
         // scripts/verify.mjs asserts on the shot this produces
         spectateStep: updateSpectator,
+        // the imported FBX soldier: what loaded, and which side wears it
+        rebel: () => rebelInfo(),
+        setRebel: (m) => setRebelMode(m),
         get cw() { return cw; },
         get streaks() { return streaks; },
         get gamemode() { return gamemode; },
@@ -819,9 +824,11 @@ function handleBotEvents(bot, events) {
     for (const e of events) {
         if (e.type === 'shot') {
             const d = e.position.distanceTo(camera.position);
-            if (d < 4) A.playGunshot(bot.weapon.audioType);
-            else A.playGunshotDistant(bot.weapon.audioType, d);
-            if (d < 30) effects.gunFlash(e.position);
+            if (Number.isFinite(d)) {
+                if (d < 4) A.playGunshot(bot.weapon.audioType);
+                else A.playGunshotDistant(bot.weapon.audioType, d);
+                if (d < 30) effects.gunFlash(e.position);
+            }
             if (gamemode.noTeams || bot.team !== TEAM_A) hud.noteEnemyFire(bot);
         } else if (e.type === 'miss') {
             effects.tracer(e.from, e.to, 300);

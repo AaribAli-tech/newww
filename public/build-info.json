@@ -1,8 +1,8 @@
 {
-  "version": "7844b1172e",
-  "builtAt": "2026-09-16T09:57:39.237Z",
+  "version": "d325f88998",
+  "builtAt": "2026-09-18T04:04:39.760Z",
   "files": [
-    "js/game.a502490cfd.js",
+    "js/game.2f4de93771.js",
     "css/styles.5d0ed77795.css",
     "sw.js",
     {
@@ -136,6 +136,22 @@
     {
       "file": "assets/models/wpn_sniper.glb",
       "bytes": 412856
+    },
+    {
+      "file": "assets/characters/rebel.fbx",
+      "bytes": 132748
+    },
+    {
+      "file": "assets/characters/BodyTexture.png",
+      "bytes": 72809
+    },
+    {
+      "file": "assets/characters/HeadTexture.png",
+      "bytes": 11263
+    },
+    {
+      "file": "assets/characters/BootsAndSkinTexture.png",
+      "bytes": 15579
     }
   ]
 }
