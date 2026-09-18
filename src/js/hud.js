@@ -240,6 +240,27 @@ export class HUD {
         txt(this.el.modeLine, (mode && mode.name) || (info && info.name) || 'Team Deathmatch');
         if (mode && Number.isFinite(mode.scoreLimit) && mode.scoreLimit > 0) this.scoreLimit = mode.scoreLimit;
         if (mode) this.setKillstreaksEnabled(mode.usesKillstreaks !== false);
+        // Which panels belong to this mode, applied now rather than on the next HUD
+        // frame: a teamless match should not open with two blue-vs-red bars, and a
+        // page whose loop is throttled (background tab, headless run) would sit on
+        // whatever the previous mode left behind.
+        this._modePanels(mode, this._modeRounds(mode));
+    }
+
+    /** A mode's `rounds` block, if it publishes one. Cheap, and only at match start. */
+    _modeRounds(mode) {
+        if (!mode || typeof mode.hudState !== 'function') return null;
+        try { const ms = mode.hudState(); return ms && ms.rounds ? ms : null; } catch { return null; }
+    }
+
+    /** Team bars vs round pips — the two panels a mode owns or does not. */
+    _modePanels(mode, ms) {
+        const rounds = ms && ms.rounds;
+        const soloMode = !!(mode && mode.noTeams);
+        this.el.roundPips.classList.toggle('on', !!rounds);
+        // Two blue-vs-red bars would be a lie in a mode with no teams; the mode
+        // line already carries "ME 12 / 200" and the rival count.
+        this.el.teamBars.classList.toggle('hidden', !!rounds || soloMode);
     }
 
     setScoreLimit(n) { if (Number.isFinite(n) && n > 0) this.scoreLimit = n; }
@@ -417,11 +438,7 @@ export class HUD {
         }
 
         const rounds = ms && ms.rounds;
-        const soloMode = !!((s.mode || this.mode) && (s.mode || this.mode).noTeams);
-        this.el.roundPips.classList.toggle('on', !!rounds);
-        // Two blue-vs-red bars would be a lie in a mode with no teams; the mode
-        // line already carries "ME 12 / 200" and the rival count.
-        this.el.teamBars.classList.toggle('hidden', !!rounds || soloMode);
+        this._modePanels(s.mode || this.mode, ms);
 
         if (rounds) {
             const a = rounds.a | 0, b = rounds.b | 0;

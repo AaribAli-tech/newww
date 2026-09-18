@@ -343,6 +343,13 @@ const kills = await race('the kill-feedback checks', () => page.evaluate(async (
     const ffaUp = await until(() => G.state === 'playing' && G.gamemode.name === 'Free For All'
         && G.bots.length > 0 && G.bots.every(b => b.allHostile === true));
     const ffa = G.gamemode;
+    // The HUD writes its mode-only panels on its own cadence, and a frame here can
+    // take a quarter of a second under a software rasteriser — so wait for those
+    // two classes rather than reading a frame that has not been painted yet. The
+    // mode being right is not the same as the DOM having caught up, and the first
+    // version of this check failed for exactly that reason.
+    await until(() => document.getElementById('teamBars').classList.contains('hidden')
+        && document.getElementById('streakCol').classList.contains('hidden'), 30000);
     out.ffa = {
         name: ffa.name,
         noTeams: ffa.noTeams === true,
@@ -469,6 +476,10 @@ const spec = await race('the spectator check', () => page.evaluate(() => {
     const t = G.specTarget;
     G.gamemode.canRespawn = wasRespawn;
     if (!t) return { error: 'no living teammate to watch' };
+    // what the framing search decided: `clear` false means every candidate was
+    // blocked by geometry and the one with the most air won — a wider shot, not a
+    // camera inside a wall
+    const framing = G.specInfo || { air: 0, clear: true, back: 0 };
     const c = G.camera;
     const hx = t.position.x, hy = t.position.y + 1.6, hz = t.position.z;
     const dist = Math.hypot(c.position.x - hx, c.position.y - hy, c.position.z - hz);
@@ -479,6 +490,7 @@ const spec = await race('the spectator check', () => page.evaluate(() => {
     const vl = Math.hypot(vx, vy, vz) || 1;
     return {
         dist, facing: (vx * fx + vy * fy + vz * fz) / vl, near: c.near,
+        clear: framing.clear, air: framing.air,
         raised: c.position.y - t.position.y, fov: Math.round(c.fov),
         name: document.getElementById('specName').textContent.trim(),
         banner: document.getElementById('spectate').classList.contains('on')
@@ -490,12 +502,19 @@ if (spec.error) {
 } else {
     log(`\n spectator        ${spec.dist.toFixed(2)} m behind ${JSON.stringify(spec.name)}` +
         ` · target ${spec.facing > 0.5 ? 'in frame' : 'OUT OF FRAME'} · ${spec.raised.toFixed(2)} m above` +
-        ` their feet · fov ${spec.fov} · banner ${spec.banner ? 'on' : 'off'}`);
+        ` their feet · fov ${spec.fov} · banner ${spec.banner ? 'on' : 'off'}` +
+        ` · framing ${spec.clear ? 'clear' : 'widened (nothing was clear, air ' + spec.air + ' m)'}`);
 }
 // third person = clearly behind the head, head inside the frame, not clipped by the
 // near plane. Anything tighter and this is a first-person camera again.
+// A camera closer than four near planes is not inside the soldier it is watching;
+// and when the search claims a clear framing, the height it framed at has to match
+// that claim — a widened shot is allowed to sit higher, on purpose.
 const specOk = !spec.error && spec.dist > 1.6 && spec.facing > 0.5 && spec.dist > spec.near * 4
-    && spec.banner;
+    && spec.banner
+    // when the search claims a clear framing it has to have the air it asked for;
+    // a widened shot is allowed to sit wherever the widest candidate could go
+    && (!spec.clear || spec.air >= 2.0);
 
 // ── repeat visit: the shell cache should turn this into a disk read ─────────
 const sw = await race('the service-worker probe', () => page.evaluate(async () => {

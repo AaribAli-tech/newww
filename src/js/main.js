@@ -374,6 +374,9 @@ function finishBoot() {
         // one frame of the spectator camera, callable without rendering —
         // scripts/verify.mjs asserts on the shot this produces
         spectateStep: updateSpectator,
+        // how the framing search ended: `clear` false means every candidate was
+        // blocked and the widest one won, which is the intended fallback
+        get specInfo() { return { air: +specAir.toFixed(2), clear: specClear, back: +specBack.toFixed(2) }; },
         // the imported FBX soldier: what loaded, and which side wears it
         rebel: () => rebelInfo(),
         setRebel: (m) => setRebelMode(m),
@@ -870,6 +873,8 @@ function handleBotEvents(bot, events) {
 // and who they are shooting. It used to sit exactly on their eye line, which put
 // the head mesh inside the near plane — all you got was the inside of a helmet
 // and a dark blob where a teammate should have been.
+let specAir = 0, specClear = false, specBack = 0;
+
 const SPEC_BACK = 4.1;        // metres behind the operator
 const SPEC_UP = 0.95;         // metres above their head
 const SPEC_SHOULDER = 0.55;   // offset so the back of the head does not fill the frame
@@ -937,7 +942,7 @@ function updateSpectator(dt = 0.016) {
     //
     // Visual meshes are merged, but collision is per-AABB, which is exactly what
     // a spectator cam wants to test against.
-    let found = false, best = -1;
+    let found = false, best = -1, bestWant = 0, clear = false;
     for (let i = 0; i < SPEC_TRIES.length; i++) {
         const f = SPEC_TRIES[i];
         _specAlt.set(
@@ -952,11 +957,14 @@ function updateSpectator(dt = 0.016) {
         const hit = cw && cw.raycast ? cw.raycast(_specFrom, _specDir, want) : null;
         const air = hit ? Math.min(hit.distance, want) : want;
         if (!found || air > best) {
-            found = true; best = air;
+            found = true; best = air; bestWant = want;
             _specWant.copy(_specAlt);
         }
-        if (!hit || (air >= want - 0.001 && air >= SPEC_CLEAR)) break;
+        if (!hit || (air >= want - 0.001 && air >= SPEC_CLEAR)) { clear = true; break; }
     }
+    // what the search settled on, for the console and for scripts/verify.mjs: a
+    // shot that had to widen is not a bug, while a camera buried in a wall is
+    specAir = best; specClear = clear; specBack = bestWant;
     // Should not happen — the widest candidate always has somewhere to stand —
     // but a camera that never moves is a worse failure than an awkward angle.
     if (!found) _specWant.copy(_specFrom).addScaledVector(_specDir, SPEC_BACK);
@@ -1101,6 +1109,10 @@ function loop(ts) {
     // HUD
     hud.update(dt, {
         player, bots,
+        // the live mode object, every frame: the HUD decides which panels belong to
+        // a mode (team bars in a teamless one, round pips in Round Control) from
+        // this, so it cannot be left holding a mode from the previous match
+        mode: gamemode,
         teamA: gamemode.teamAScore, teamB: gamemode.teamBScore,
         timeLeft: gamemode.timeRemaining,
         uav: streaks.uavOnline,

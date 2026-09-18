@@ -340,5 +340,21 @@ group('rebel-pose.js — the FBX calibration both pages share');
         /cloneRig\(rig\.group\)/.test(tester) && /userData\.part = isHead \? 'head' : 'body'/.test(tester));
 }
 
+// ── 9. panels a mode owns are applied at match start, not on a later frame ───
+// Free For All has no teams, so the blue-vs-red bars must be gone. They were only
+// ever toggled from the per-frame HUD pass, which is why a headless verifier could
+// read them as still visible: the loop had not run the frame yet. Same class of bug
+// as a scoreboard labelled from the previous match — the fix is to apply it where
+// the mode is handed over.
+group('hud.js — mode panels at match start');
+{
+    const hud = await readFile(new URL('../src/js/hud.js', import.meta.url), 'utf8');
+    const setMode = hud.slice(hud.indexOf('setMode(mode) {'), hud.indexOf('setScoreLimit'));
+    ok('setMode applies the mode panels itself', /this\._modePanels\(mode, this\._modeRounds\(mode\)\)/.test(setMode));
+    ok('the per-frame pass calls the same helper, so the two cannot disagree',
+        /_modeHud[\s\S]{0,700}this\._modePanels\(s\.mode \|\| this\.mode, ms\)/.test(hud));
+    ok('nothing else toggles the team bars', (hud.match(/el\.teamBars\.classList/g) || []).length === 1);
+}
+
 console.log(`\n${fail === 0 ? '✓' : '✗'} ${pass} passed, ${fail} failed\n`);
 process.exit(fail === 0 ? 0 : 1);
