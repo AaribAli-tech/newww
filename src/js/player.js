@@ -3,7 +3,7 @@
 // ============================================================================
 import * as THREE from 'three';
 import { WEAPON_DEFS } from './weapons.js';
-import { clamp, TEAM_A } from './utils.js';
+import { clamp, TEAM_A, clampToMap } from './utils.js';
 import {
     playGunshot, playDryFire, playReload, playFootstep, playJump, playLand,
     playHurt, playLowHealth, playWeaponSwap
@@ -469,6 +469,9 @@ export class Player {
         this.cw.resolveAxis(this.position, this.radius, this.currentEye, 'x');
         this.position.z += this.velocity.z * dt;
         this.cw.resolveAxis(this.position, this.radius, this.currentEye, 'z');
+        // Same rule as the bots: the perimeter is a clamp, not a mesh they can
+        // slip through when something else pushes them into it.
+        if (clampToMap(this.position, 2.0)) { this.velocity.x *= 0.2; this.velocity.z *= 0.2; }
 
         this.velocity.y -= this.gravity * dt;
         this.position.y += this.velocity.y * dt;

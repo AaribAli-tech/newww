@@ -19,8 +19,10 @@
 // ============================================================================
 import * as THREE from 'three';
 import * as M from './materials.js';
+import { MAP_RECT } from './utils.js';
 
-export const MAP_BOUNDS = { minX: -42, maxX: 42, minZ: -40, maxZ: 38 };
+/** The one rectangle both the geometry and the entities agree on (utils.js). */
+export const MAP_BOUNDS = MAP_RECT;
 
 // ── the circle and its road ─────────────────────────────────────────────────
 const CIRCLE_R = 12.5;                 // paved radius of the cul-de-sac
@@ -1568,11 +1570,19 @@ function validateWaypoints(cw) {
 const mirrorXZ = n => ({ x: -n.x, z: n.z });
 const mirrorXYZ = n => ({ x: -n.x, y: n.y, z: n.z });
 
-/** Back yard behind the yellow house (east). */
+/**
+ * Back yard behind the yellow house (east).
+ *
+ * These used to include two points at x 39.5 — two and a half metres from the
+ * chain-link, and with the ±1.2 m spawn jitter sometimes closer to the fence than
+ * to cover. Players read a soldier who materialises against the perimeter as
+ * having spawned outside the map, so the pair moved in to 36.6, where the houses
+ * still screen them and the street still owns them.
+ */
 const SPAWN_EAST = [
     { x: 37.0, z: -6.0 }, { x: 37.0, z: -2.0 }, { x: 37.0, z: 2.0 },
     { x: 34.0, z: -9.0 }, { x: 34.0, z: 5.0 },
-    { x: 39.5, z: -4.0 }, { x: 39.5, z: 0.0 }
+    { x: 36.6, z: -4.0 }, { x: 36.6, z: 0.0 }
 ];
 export const SPAWN_A = SPAWN_EAST.map(mirrorXZ);   // west team, behind the teal house
 export const SPAWN_B = SPAWN_EAST.slice();          // east team, behind the yellow house

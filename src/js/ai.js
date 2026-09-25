@@ -14,7 +14,7 @@ import { rigFor } from './rebel.js';
 // player from across the map. Gun Game overrides this per bot via weaponPool.
 import { WEAPON_DEFS, BOT_WEAPON_POOL } from './weapons.js';
 import { WAYPOINTS, SPAWN_A, SPAWN_B, PERCHES } from './map.js';
-import { TEAM_A, rand, randElement, dist2D, clamp } from './utils.js';
+import { TEAM_A, rand, randElement, dist2D, clamp, clampToMap } from './utils.js';
 
 const ST = { PATROL: 0, HUNT: 1, ENGAGE: 2, RELOAD: 3, FALLBACK: 4, HOLD: 5, DEAD: 6 };
 const EYE = 1.52, EYE_CROUCH = 1.02;
@@ -30,6 +30,9 @@ export class Bot {
         this.team = team;
         this.scene = scene;
         this.skill = skill;
+        // Difficulty scales (see difficulty.js). Neutral by default so a bot built
+        // without one fights exactly as it always did.
+        this.aimScale = 1; this.spreadScale = 1; this.reactionScale = 1; this.chanceCap = 0.72;
 
         this.position = new THREE.Vector3();
         this.velocity = new THREE.Vector3();
@@ -108,6 +111,7 @@ export class Bot {
             ? this.spawnPoints : (this.team === TEAM_A ? SPAWN_A : SPAWN_B);
         const sp = pos || randElement(list);
         this.position.set(sp.x + rand(-1.2, 1.2), 0, sp.z + rand(-1.2, 1.2));
+        clampToMap(this.position, 2.4);          // nobody is born in the fence strip
         this.velocity.set(0, 0, 0);
         this.health = this.maxHealth;
         this.alive = true;
@@ -322,7 +326,7 @@ export class Bot {
             this.lastSeen = _c.copy(seen.position).clone();
             this.lastSeenTime = now;
             if (this.state === ST.PATROL || this.state === ST.HOLD || this.state === ST.HUNT) {
-                if (this.state !== ST.ENGAGE) this.reaction = rand(0.14, 0.42) * (1.4 - this.skill);
+                if (this.state !== ST.ENGAGE) this.reaction = rand(0.14, 0.42) * (1.4 - this.skill) * this.reactionScale;
                 this.state = ST.ENGAGE;
             }
         } else if (this.state === ST.ENGAGE && now - this.lastSeenTime > 1400) {
@@ -452,6 +456,12 @@ export class Bot {
         this.position.z += this.velocity.z * dt;
         cw.resolveAxis(this.position, 0.34, 1.75, 'x');
         cw.resolveAxis(this.position, 0.34, 1.75, 'z');
+        // The fence line is the last word. The chain-link and its invisible wall
+        // usually do the job, but a bot shoved by a squadmate or walked off a roof
+        // can end up in the two-metre strip outside the last cover line — and to
+        // anyone playing, an enemy standing against the perimeter is an enemy who
+        // spawned outside the map. So the perimeter is a number, not a suggestion.
+        if (clampToMap(this.position, 2.0)) { this.velocity.x *= 0.2; this.velocity.z *= 0.2; }
 
         this.velocity.y -= 22 * dt;
         this.position.y += this.velocity.y * dt;
@@ -549,9 +559,11 @@ export class Bot {
         const rangeFactor = clamp(1 - (dist - w.falloffStart * 0.5) / w.range, 0.18, 1);
         const moving = Math.hypot(this.velocity.x, this.velocity.z) > 2 ? 0.72 : 1;
         const crouchBonus = this.isCrouching ? 1.15 : 1;
-        let chance = (0.16 + this.skill * 0.42) * rangeFactor * moving * crouchBonus;
+        let chance = (0.16 + this.skill * 0.42) * rangeFactor * moving * crouchBonus * this.aimScale;
         if (this.suppressed > 0) chance *= 0.8;
-        chance = clamp(chance, 0.03, 0.72);
+        // The cap belongs to the difficulty: on Easy a bot has off days it cannot
+        // recover from, on Hard it does not.
+        chance = clamp(chance, 0.03, this.chanceCap);
 
         const hit = Math.random() < chance;
         const muzzle = new THREE.Vector3();
@@ -567,7 +579,11 @@ export class Bot {
         } else {
             // spray a near miss so the player hears/sees rounds going past
             const miss = _b.clone();
-            miss.x += rand(-1.6, 1.6); miss.y += rand(-0.7, 1.1); miss.z += rand(-1.6, 1.6);
+            // Scaled by the difficulty too, so a miss on Easy is visibly wild —
+            // dirt kicking up beside you — instead of a near miss you cannot tell
+            // apart from a hit you survived.
+            const sp = this.spreadScale;
+            miss.x += rand(-1.6, 1.6) * sp; miss.y += rand(-0.7, 1.1) * sp; miss.z += rand(-1.6, 1.6) * sp;
             const dir = miss.clone().sub(muzzle).normalize();
             const h = cw.raycast(muzzle, dir, w.range);
             this.events.push({

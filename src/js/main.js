@@ -16,6 +16,7 @@ import { createMode, MODES } from './modes.js';
 import { selectedMode as pickedMode, onModeChange } from './hud.js';
 import { createPostFX } from './shaders.js';
 import { createFreeRoam } from './freeroam.js';
+import { DIFFICULTIES, difficultyById, isDifficulty, applyDifficulty, rollSkill, DEFAULT_DIFFICULTY } from './difficulty.js';
 import { characterAssets } from './character.js';
 import { vmAssets, vmAssetsReady } from './vmassets.js';
 import { upgradeTextures, photoStatus } from './materials.js';
@@ -89,18 +90,25 @@ const QUALITY = [
 // Start on Low. A first run that stutters is a much worse first impression than
 // one that looks slightly plainer, and the auto-tuner raises the preset within
 // a few seconds on any machine with headroom to spare.
-const DEFAULTS = { sens: 1.0, fov: 78, quality: 0 };
+// `difficulty: null` is the state "never asked yet" — the first Deploy screen
+// answers it and it is saved from then on.
+const DEFAULTS = { sens: 1.0, fov: 78, quality: 0, difficulty: null };
 let settings = { ...DEFAULTS };
 
 function loadSettings() {
     try {
         const raw = localStorage.getItem('nuketown.settings');
         if (raw) settings = { ...DEFAULTS, ...JSON.parse(raw) };
+        // A hand-edited or stale profile must not put a bot on a setting that
+        // does not exist; null means the menu will simply ask again.
+        if (!isDifficulty(settings.difficulty)) settings.difficulty = null;
     } catch { settings = { ...DEFAULTS }; }
 }
 function saveSettings() {
     try { localStorage.setItem('nuketown.settings', JSON.stringify(settings)); } catch { /* private mode */ }
 }
+
+const diffEntry = () => difficultyById(settings.difficulty || DEFAULT_DIFFICULTY);
 
 const _v = new THREE.Vector3();
 
@@ -265,6 +273,63 @@ function setupRenderer() {
     }, false);
 }
 
+// ── difficulty: the ask, the chip, the live switch ──────────────────────────
+// Asked once, on the first Deploy screen, then remembered: a modal before every
+// match is friction, and this is a decision about how you like the game rather
+// than about this round. Controls carries the same three choices for afterwards,
+// and picking one re-scales the soldiers already on the map — there is no reason
+// to make someone quit a match to try Hard.
+function showDiffGate() { const g = $('diffGate'); if (g) g.classList.add('on'); document.exitPointerLock(); }
+function hideDiffGate() { const g = $('diffGate'); if (g) g.classList.remove('on'); }
+const diffGateOpen = () => { const g = $('diffGate'); return !!g && g.classList.contains('on'); };
+
+function paintDifficulty() {
+    const d = diffEntry();
+    const chip = $('menuDiffVal');
+    if (chip) chip.textContent = d.name;
+    for (const b of document.querySelectorAll('#diffGateOpts .diffOpt')) b.classList.toggle('on', b.dataset.id === d.id);
+    for (const b of document.querySelectorAll('#diffSeg button')) b.classList.toggle('on', b.dataset.id === d.id);
+    const out = $('diffOut');
+    if (out) out.textContent = d.blurb;
+}
+
+function setDifficulty(id, announce = false) {
+    const d = difficultyById(id);            // unknown ids fall back to Medium
+    settings.difficulty = d.id;
+    saveSettings();
+    for (const b of bots) applyDifficulty(b, d);
+    paintDifficulty();
+    if (announce) hud.banner(`ENEMY SKILL — ${d.name.toUpperCase()}`, '#FFC24A', d.blurb);
+}
+
+function buildDifficultyUI() {
+    const gate = $('diffGateOpts'), seg = $('diffSeg');
+    if (gate && !gate.childElementCount) {
+        for (const d of DIFFICULTIES) {
+            const b = document.createElement('button');
+            b.type = 'button'; b.className = 'diffOpt'; b.dataset.id = d.id;
+            b.innerHTML = `<h4>${d.name}</h4><p>${d.blurb}</p>`;
+            b.onclick = () => { setDifficulty(d.id); hideDiffGate(); };
+            gate.appendChild(b);
+        }
+    }
+    if (seg && !seg.childElementCount) {
+        for (const d of DIFFICULTIES) {
+            const b = document.createElement('button');
+            b.type = 'button'; b.dataset.id = d.id; b.textContent = d.name;
+            // Mid-match it is worth saying something, because the fight visibly
+            // changes; on the menu the chip already shows it.
+            b.onclick = () => setDifficulty(d.id, state === 'playing' || state === 'paused');
+            seg.appendChild(b);
+        }
+    }
+    const skip = $('diffGateSkip');
+    if (skip) skip.onclick = () => { setDifficulty(DEFAULT_DIFFICULTY); hideDiffGate(); };
+    const change = $('btnDiffChange');
+    if (change) change.onclick = showDiffGate;
+    paintDifficulty();
+}
+
 function setupWorld() {
     cw = new CollisionWorld();
     const built = buildNuketown(scene, cw);
@@ -366,7 +431,10 @@ function setupPost() {
 
 function finishBoot() {
     bindUI();
+    buildDifficultyUI();
     state = 'menu';
+    // The one ask. Everything after this is a setting like any other.
+    if (!isDifficulty(settings.difficulty)) showDiffGate();
     $('loader').style.opacity = '0';
     setTimeout(() => $('loader').style.display = 'none', 500);
 
@@ -408,6 +476,9 @@ function finishBoot() {
         setRebel: (m) => setRebelMode(m),
         get cw() { return cw; },
         get streaks() { return streaks; },
+        // 'easy' | 'medium' | 'hard' — the same three buttons the menu asks with
+        get difficulty() { return settings.difficulty; },
+        setDifficulty: (id) => setDifficulty(id, false),
         get gamemode() { return gamemode; },
         // Which of the optional GLB/photo layers actually landed. Handy in the
         // console, and this is what scripts/verify.mjs asserts on.
@@ -527,6 +598,7 @@ function bindUI() {
     });
     window.addEventListener('keydown', e => {
         if (e.code === 'Escape') {
+            if (diffGateOpen()) { hideDiffGate(); return; }
             if ($('panel').style.display === 'flex') { $('panel').style.display = 'none'; return; }
             if (state === 'playing') pause(true);
             else if (state === 'paused') pause(false);
@@ -690,6 +762,10 @@ function applyQuality() {
 
 // ── match flow ──────────────────────────────────────────────────────────────
 function startMatch() {
+    // Starting a match from the keyboard while the ask is still up (Enter reaches
+    // Deploy) is an answer too: it means Medium, and it is remembered, so the
+    // gate does not come back next visit to ask a question that was answered.
+    if (!isDifficulty(settings.difficulty)) setDifficulty(DEFAULT_DIFFICULTY);
     $('menu').style.display = 'none';
     $('panel').style.display = 'none';
     hud.hideEnd(); hud.hideDeath();
@@ -726,12 +802,18 @@ function startMatch() {
     // three of the eight on your side, which is exactly the bunch you could
     // neither hit nor spot.
     const asEnemy = !!gamemode.noTeams;
+    // Skill used to be one roll for everyone, so "harder" was not a thing the
+    // player could ask for. The band comes from difficulty.js and the aim,
+    // reaction and miss-spread scales go on the bot with it.
+    const diff = diffEntry();
     for (let i = 0; i < nA; i++) {
-        const b = new Bot(namesA[i], asEnemy ? TEAM_B : TEAM_A, scene, 0.34 + Math.random() * 0.3);
+        const b = new Bot(namesA[i], asEnemy ? TEAM_B : TEAM_A, scene, rollSkill(diff));
+        applyDifficulty(b, diff);
         b.spawn(); bots.push(b);
     }
     for (let i = 0; i < nB; i++) {
-        const b = new Bot(namesB[i], TEAM_B, scene, 0.34 + Math.random() * 0.34);
+        const b = new Bot(namesB[i], TEAM_B, scene, rollSkill(diff));
+        applyDifficulty(b, diff);
         b.spawn(); bots.push(b);
     }
 

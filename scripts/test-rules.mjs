@@ -205,8 +205,10 @@ group('modes.js — Gun Game');
 
     ok('you start on the first gun', player.current === GUN_GAME_LADDER[0] && player._ggRung === 0,
         WEAPON_DEFS[player.current].short);
-    ok('the HUD says 1 / 4 and names the next gun',
-        m.hudState().primary === '1 / 4' && /NEXT/.test(m.hudState().secondary), m.hudState().secondary);
+    ok('the match is raced to 75 kills, not to the last gun', m.killTarget === 75, String(m.killTarget));
+    ok('the HUD counts kills against 75 and still names the gun you are on',
+        m.hudState().primary === '0 / 75' && /GUN 1\/4/.test(m.hudState().secondary)
+        && /NEXT:/.test(m.hudState().secondary), `${m.hudState().primary} · ${m.hudState().secondary}`);
 
     m.onKill(player, bots[0]);
     ok('one kill moves you up exactly one gun', player._ggRung === 1 && player.current === GUN_GAME_LADDER[1],
@@ -219,17 +221,26 @@ group('modes.js — Gun Game');
         player.weapons[GUN_GAME_LADDER[1]].ammo === WEAPON_DEFS[GUN_GAME_LADDER[1]].magSize);
 
     m.onKill(bots[0], player);
-    ok('the enemy climbs the same ladder', bots[0]._ggRung === 1 && bots[0].weaponIndex === GUN_GAME_LADDER[1]);
+    ok('the enemy climbs the same ladder', bots[0]._ggRung === 1 && bots[0].weaponIndex === GUN_GAME_LADDER[1]
+        && bots[0]._ggKills === 1, `rung ${bots[0]._ggRung}`);
     m.onKill(bots[0], player);
+    ok('two kills is two guns, and nobody has won anything yet',
+        !m.isOver() && bots[0]._ggKills === 2 && bots[0]._ggRung === 2, `kills ${bots[0]._ggKills}`);
     m.onKill(bots[0], player);
-    ok('but a rival on rung 3 has not won it yet', !m.isOver() && bots[0]._ggRung === 3,
-        `rung ${bots[0]._ggRung}`);
+    ok('the fourth gun is one kill from a lap, not one from winning',
+        !m.isOver() && bots[0]._ggKills === 3 && bots[0]._ggRung === 3, `rung ${bots[0]._ggRung}`);
     m.onKill(bots[0], player);
-    ok('and they can win it while you are still climbing', m.isOver() && m.result().won === false,
+    ok('the fourth gun wraps them back to the first and the match goes on',
+        !m.isOver() && bots[0]._ggRung === 0 && bots[0].weaponIndex === GUN_GAME_LADDER[0]
+        && bots[0]._ggKills === 4, `rung ${bots[0]._ggRung} kills ${bots[0]._ggKills}`);
+    for (let i = 0; i < 70; i++) m.onKill(bots[0], player);
+    ok('74 kills is still not a win', !m.isOver() && bots[0]._ggKills === 74, String(bots[0]._ggKills));
+    m.onKill(bots[0], player);
+    ok('and they can win it at 75 while you are still climbing', m.isOver() && m.result().won === false,
         m.result().subtitle);
-    ok('the loss says who finished and how far you got',
-        /finished the ladder/.test(m.result().subtitle) && /2\/4/.test(m.result().subtitle),
-        m.result().subtitle);
+    ok('the loss says what it took and how far you got',
+        /75 kills to win/.test(m.result().subtitle) && /you had 1/.test(m.result().subtitle)
+        && /PAIN-B got 75/.test(m.result().subtitle), m.result().subtitle);
 
     // a clean board: run the player's own ladder to the end
     const p2 = fakePlayer();
@@ -238,7 +249,13 @@ group('modes.js — Gun Game');
     for (let i = 0; i < 3; i++) m2.onKill(p2, { team: TEAM_B });
     ok('three kills is not the win', !m2.isOver() && p2._ggRung === 3);
     m2.onKill(p2, { team: TEAM_B });
-    ok('the fourth rung wins it', m2.isOver() && m2.result().won === true, m2.result().subtitle);
+    ok('nor is the fourth — that is lap 2, back on the first gun',
+        !m2.isOver() && p2._ggRung === 0 && p2._ggKills === 4 && p2.current === GUN_GAME_LADDER[0]
+        && /LAP 2/.test(m2.hudState().secondary), m2.hudState().secondary);
+    ok('…and the wrap is announced as a lap, not as a finish',
+        /LAP 2 — back to/.test(banners[banners.length - 1]), String(banners[banners.length - 1]));
+    for (let i = 0; i < 71; i++) m2.onKill(p2, { team: TEAM_B });
+    ok('75 kills wins it', m2.isOver() && m2.result().won === true, m2.result().subtitle);
     ok('no gun is used twice on the ladder', new Set(GUN_GAME_LADDER).size === GUN_GAME_LADDER.length);
     ok('and a kill on a former team-mate still counts here (no teams)', (() => {
         const mate = fakeBot('REYES-A', TEAM_A);
@@ -248,10 +265,12 @@ group('modes.js — Gun Game');
         m3.onKill(p3, mate);
         return p3._ggRung === 1;
     })());
-    ok('and the win names the last gun', /4\/4|All 4 weapons|weapons/.test(m2.result().subtitle),
-        m2.result().subtitle);
+    ok('the win says the count that did it, not the gun you happened to be on',
+        /75 kills to win · you had 75/.test(m2.result().subtitle), m2.result().subtitle);
     const s = m2.standings();
-    ok('the board shows each rival’s rung', m2.bots().length === 0 || /^\d\/4 /.test(s.rows[0].tag), s.rows[0].tag);
+    ok('the board counts kills, because a gun no longer says who is winning',
+        /^\d+\/75 /.test(s.rows[0].tag), s.rows[0].tag);
+    ok('…and its title says what the match is', /75 kills/.test(s.title), s.title);
 }
 
 // ── 4. the modes the game already had still work ─────────────────────────────
@@ -462,6 +481,88 @@ group('main.js / hud.js — the handover, and not painting over the game');
     ok('a lost GL context is caught, stopped and explained',
         /addEventListener\('webglcontextlost'/.test(main) && /e\.preventDefault\(\)/.test(main)
         && /if \(glLost\) return;/.test(main));
+}
+
+// ── 11. difficulty is a number the AI reads, not a label on a button ─────────
+group('difficulty.js — easy / medium / hard');
+{
+    const D = await import('../src/js/difficulty.js');
+    const easy = D.difficultyById('easy'), med = D.difficultyById('medium'), hard = D.difficultyById('hard');
+    ok('the three options exist and an unknown id falls back to Medium',
+        D.DIFFICULTIES.length === 3 && D.difficultyById('nightmare').id === D.DEFAULT_DIFFICULTY);
+    ok('they order up: aim, skill band and cap all climb',
+        easy.aimScale < med.aimScale && med.aimScale < hard.aimScale &&
+        easy.skill[1] < med.skill[0] && med.skill[1] < hard.skill[0] &&
+        easy.chanceCap < med.chanceCap && med.chanceCap < hard.chanceCap,
+        `${easy.aimScale}/${med.aimScale}/${hard.aimScale}`);
+    ok('easy misses wide and slow to react, hard does neither',
+        easy.spreadScale > 2 && easy.reactionScale > 1.5 && hard.spreadScale < 1 && hard.reactionScale < 1);
+    const roll = d => { const out = []; for (let i = 0; i < 60; i++) out.push(D.rollSkill(d, () => i / 60)); return out; };
+    ok('the skill roll stays inside the band, so a squad is varied but not wrong',
+        roll(easy).every(x => x >= easy.skill[0] - 1e-9 && x <= easy.skill[1] + 1e-9)
+        && roll(hard).every(x => x >= hard.skill[0] && x <= hard.skill[1]));
+    const bot = D.skillFor('easy', {});
+    ok('applying it writes exactly the fields ai.js reads',
+        bot.aimScale === easy.aimScale && bot.spreadScale === easy.spreadScale
+        && bot.reactionScale === easy.reactionScale && bot.chanceCap === easy.chanceCap
+        && bot.difficulty === 'easy' && bot.skill >= easy.skill[0] && bot.skill <= easy.skill[1]);
+    ok('and a mid-match switch re-scales a live bot without touching its skill',
+        (() => { const before = bot.skill; D.applyDifficulty(bot, 'hard');
+            return bot.skill === before && bot.aimScale === hard.aimScale && bot.difficulty === 'hard'; })());
+    ok('describe() says what the option does, for the card', /Easy —/.test(D.describe('easy')));
+
+    // The wiring that makes the module real: ai.js must multiply by these, and the
+    // menu must set them.
+    const ai = await readFile(new URL('../src/js/ai.js', import.meta.url), 'utf8');
+    ok('ai.js reads the scales', /chance = clamp\(chance, 0\.03, this\.chanceCap\)/.test(ai)
+        && /\* this\.aimScale/.test(ai) && /rand\(-1\.6, 1\.6\) \* sp/.test(ai)
+        && /\* this\.reactionScale/.test(ai));
+    ok('a bot without a difficulty fights at the old numbers', /this\.chanceCap = 0\.72;/.test(ai));
+    const main = await readFile(new URL('../src/js/main.js', import.meta.url), 'utf8');
+    ok('the game asks on a fresh profile and remembers after',
+        /if \(!isDifficulty\(settings\.difficulty\)\) showDiffGate\(\);/.test(main)
+        && /difficulty: null/.test(main) && /if \(!isDifficulty\(settings\.difficulty\)\) settings\.difficulty = null;/.test(main));
+    ok('the ask names the way back in Controls',
+        /You can change it later in Controls\./.test(await readFile(new URL('../src/index.html', import.meta.url), 'utf8')));
+    ok('changing it re-scales the soldiers already alive',
+        /for \(const b of bots\) applyDifficulty\(b, d\);/.test(main));
+    ok('a Deploy from the keyboard with no answer yet counts as Medium, and is saved',
+        /if \(!isDifficulty\(settings\.difficulty\)\) setDifficulty\(DEFAULT_DIFFICULTY\);/.test(main));
+}
+
+// ── 12. the menu sells Gun Game as it now plays ─────────────────────────────
+group('modes.js — Gun Game, described honestly');
+{
+    const modes = await readFile(new URL('../src/js/modes.js', import.meta.url), 'utf8');
+    ok('the target is a named constant, not a number repeated in three places',
+        /export const GUN_GAME_KILLS = 75;/.test(modes) && /this\.killTarget = GUN_GAME_KILLS;/.test(modes));
+    ok('the playlist card says 75 kills and cycling guns',
+        /75 kills · 4 guns, and they keep cycling as you climb\./.test(modes));
+}
+
+// ── 13. nothing ends up outside the fence ───────────────────────────────────
+group('utils.js — the perimeter is a clamp, not a mesh');
+{
+    const U = await import('../src/js/utils.js');
+    ok('the rectangle is the one the map uses', U.MAP_RECT.maxX === 42 && U.MAP_RECT.minZ === -40);
+    const p = { x: 61.3, y: 0, z: -900 };
+    ok('a runaway position is pulled back inside', U.clampToMap(p, 2.0) === true
+        && p.x === U.MAP_RECT.maxX - 2 && p.z === U.MAP_RECT.minZ + 2, JSON.stringify(p));
+    ok('and an in-bounds position is left completely alone',
+        (() => { const q = { x: 3.5, z: -7.25 }; const moved = U.clampToMap(q, 2.0); return !moved && q.x === 3.5 && q.z === -7.25; })());
+    ok('a NaN is recovered instead of parked at sea',
+        (() => { const q = { x: NaN, z: 4 }; U.clampToMap(q, 2.0); return q.x === 0 && q.z === 4; })());
+    const ai = await readFile(new URL('../src/js/ai.js', import.meta.url), 'utf8');
+    const pl = await readFile(new URL('../src/js/player.js', import.meta.url), 'utf8');
+    ok('bots clamp after collision and drop the outward push',
+        /if \(clampToMap\(this\.position, 2\.0\)\) \{ this\.velocity\.x \*= 0\.2/.test(ai));
+    ok('so does the player', /clampToMap\(this\.position, 2\.0\)/.test(pl));
+    ok('nobody is born in the fence strip either', /clampToMap\(this\.position, 2\.4\)/.test(ai));
+    const map = await readFile(new URL('../src/js/map.js', import.meta.url), 'utf8');
+    ok('and the spawn points sit inside the last cover line',
+        !/x: 39\.5/.test(map) && /x: 36\.6, z: -4\.0/.test(map));
+    ok('the map and the entities agree on one rectangle',
+        /export const MAP_BOUNDS = MAP_RECT;/.test(map));
 }
 
 console.log(`\n${fail === 0 ? '✓' : '✗'} ${pass} passed, ${fail} failed\n`);

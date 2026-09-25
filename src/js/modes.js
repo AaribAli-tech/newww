@@ -23,7 +23,7 @@ export const MODES = [
     { id: 'tdm', name: 'Team Deathmatch', desc: '5v5 · first to 75 kills · respawns on.' },
     { id: 'ctl', name: 'Round Control',   desc: '3v3 · one life per round · first to 3 rounds.' },
     { id: 'ffa', name: 'Free For All',    desc: '8 solos · no teams · first to 200 kills, anyone can win.' },
-    { id: 'gun', name: 'Gun Game',        desc: '4 guns · every kill moves you up a gun · finish the ladder first.' }
+    { id: 'gun', name: 'Gun Game',        desc: '75 kills · 4 guns, and they keep cycling as you climb.' }
 ];
 
 // ── tables ──────────────────────────────────────────────────────────────────
@@ -34,6 +34,14 @@ const inRange = i => Number.isInteger(i) && i >= 0 && i < DEFS.length;
 
 const _ladder = (Array.isArray(W.GUN_GAME_LADDER) ? W.GUN_GAME_LADDER : []).filter(inRange);
 const LADDER = _ladder.length ? _ladder : DEFS.map((_, i) => i);
+
+/**
+ * Kills it takes to win Gun Game. The ladder is four guns long, so 75 kills is
+ * not a longer ladder — it is the same short one walked again and again, ~19 laps,
+ * and that is the part that makes it a match rather than a sprint: you have to be
+ * able to win with the pistol as well as with the rifle.
+ */
+export const GUN_GAME_KILLS = 75;
 
 const _pool = (Array.isArray(W.BOT_WEAPON_POOL) ? W.BOT_WEAPON_POOL : [0, 1, 2, 3]).filter(inRange);
 const BOT_POOL = _pool.length ? _pool : [0];
@@ -618,6 +626,8 @@ class GunGame extends BaseMode {
         // free rungs, and the match ends on a ladder, not on a streak.
         this.disabledStreaks = new Set(['uav', 'air', 'nuke']);
         this.rungs = LADDER.length;
+        this.killTarget = GUN_GAME_KILLS;
+        this._capKills = -1;
         this.reset();
     }
 
@@ -626,11 +636,12 @@ class GunGame extends BaseMode {
         this._want = -1;              // ladder weapon the player should be holding
         this._elapsed = 0;
         this.champion = '';
+        this.championKills = 0;
         this._capKey = null;
         const p = this.player;
-        if (p) p._ggRung = 0;
+        if (p) { p._ggRung = 0; p._ggKills = 0; }
         const bots = this.bots();
-        for (let i = 0; i < bots.length; i++) if (bots[i]) bots[i]._ggRung = 0;
+        for (let i = 0; i < bots.length; i++) if (bots[i]) { bots[i]._ggRung = 0; bots[i]._ggKills = 0; }
     }
 
     // No time limit, so the HUD clock counts the match up instead of down.
@@ -638,7 +649,7 @@ class GunGame extends BaseMode {
 
     onMatchStart() {
         this.reset();
-        this.banner('GUN GAME', '#FFC24A', `Run all ${this.rungs} weapons · every kill moves you up one`);
+        this.banner('GUN GAME', '#FFC24A', `${this.killTarget} kills · ${this.rungs} guns, cycling every kill`);
         this._equipPlayer(LADDER[0]);
         const bots = this.bots();
         for (let i = 0; i < bots.length; i++) this._solofy(bots[i]);
@@ -692,17 +703,23 @@ class GunGame extends BaseMode {
         const e = mine ? this.player : killer;
         if (!e) return;
 
-        const next = (e._ggRung | 0) + 1;
-        if (next >= LADDER.length) { this._finish(e, mine); return; }
+        e._ggKills = (e._ggKills | 0) + 1;
+        if (e._ggKills >= this.killTarget) { this._finish(e, mine); return; }
+        // The ladder wraps. Reaching the last gun is not the win — surviving the
+        // climb back down to the pistol again is, which is why 75 kills on four
+        // guns asks you to have a plan for every one of them.
+        const next = e._ggKills % LADDER.length;
+        const lap = 1 + Math.floor(e._ggKills / LADDER.length);
         e._ggRung = next;
 
         if (mine) {
             this._equipPlayer(LADDER[next]);
-            this.banner(`LEVEL ${next + 1}`, '#67c6ff', this._nameAt(next));
+            this.banner(next === 0 ? `LAP ${lap} — back to ${this._nameAt(0)}` : `LEVEL ${next + 1}`,
+                '#67c6ff', `${this._nameAt(next)} · ${e._ggKills}/${this.killTarget} kills`);
         } else if (e.setWeapon) {
             e.setWeapon(LADDER[next]);
-            if (next >= LADDER.length - 2) {
-                this.banner(`${e.name} IS ON ${next + 1}`, '#FF9A3C', 'Close them out');
+            if (this.killTarget - e._ggKills <= 5) {
+                this.banner(`${e.name} IS ON ${e._ggKills}/${this.killTarget}`, '#FF9A3C', 'Close them out');
             }
         }
     }
@@ -722,25 +739,25 @@ class GunGame extends BaseMode {
 
     result() {
         const r = this._result;
-        const mine = `you reached ${this.rung + 1}/${this.rungs}`;
+        const mine = (this.player && this.player._ggKills) | 0;
         r.won = this.scoring.winner === TEAM_A;
         r.title = r.won ? 'VICTORY' : 'DEFEAT';
-        // Only say somebody finished the ladder when somebody else did — a win of
-        // your own should not read like a report about someone else.
-        const clean = r.won && (!this.champion || this.champion === 'You');
-        r.subtitle = clean
-            ? `All ${this.rungs} weapons`
-            : `${this.champion ? `${this.champion} finished the ladder` : 'Ladder not finished'} · ${mine}`;
+        r.subtitle = `${this.killTarget} kills to win · you had ${mine}`
+            + (this.champion && this.champion !== 'You' ? ` · ${this.champion} got ${this.championKills}` : '');
         return r;
     }
 
     hudState() {
         const h = this._hud;
         const r = this.rung;
-        if (r !== this._capKey) {
-            this._capKey = r;
-            h.primary = `${Math.min(r + 1, this.rungs)} / ${this.rungs}`;
-            h.secondary = r + 1 < LADDER.length ? `NEXT: ${this._nameAt(r + 1)}` : 'FINAL WEAPON';
+        const kills = (this.player && this.player._ggKills) | 0;
+        // The count, not the rung, is what moves now: the rung comes back around
+        // every four kills, and the number the match is actually racing is 75.
+        if (r !== this._capKey || kills !== this._capKills) {
+            this._capKey = r; this._capKills = kills;
+            h.primary = `${kills} / ${this.killTarget}`;
+            h.secondary = `GUN ${r + 1}/${this.rungs} · LAP ${1 + Math.floor(kills / LADDER.length)}`
+                + ` · NEXT: ${this._nameAt((r + 1) % LADDER.length)}`;
         }
         return h;
     }
@@ -761,11 +778,14 @@ class GunGame extends BaseMode {
                 name: this.isPlayer(e) ? 'You' : e.name,
                 k: e.kills | 0, d: e.deaths | 0, s: e.score | 0,
                 me: this.isPlayer(e),
-                tag: `${rung + 1}/${this.rungs} ${d ? d.short : ''}`.trim()
+                // Kills first, gun second: once the ladder wraps, the gun says
+                // nothing about how close anybody is to winning.
+                tag: `${e._ggKills | 0}/${this.killTarget} ${d ? d.short : ''}`.trim()
             });
         }
-        rows.sort((a, b) => (parseInt(b.tag, 10) || 0) - (parseInt(a.tag, 10) || 0) || b.k - a.k);
-        return { title: `GUN GAME · ${this.rungs} weapons`, columns: ['Operator', 'Kills', 'Dead', 'Score'], rows };
+        rows.sort((a, b) => b.k - a.k);
+        return { title: `GUN GAME · ${this.killTarget} kills · ${this.rungs} guns`,
+            columns: ['Operator', 'Kills', 'Dead', 'Score'], rows };
     }
 
     // Bots re-roll a weapon whenever ai.js respawns them — put them back on
@@ -793,11 +813,12 @@ class GunGame extends BaseMode {
 
     _finish(entity, mine) {
         this.champion = entity.name || 'Enemy';
+        this.championKills = entity._ggKills | 0;
         entity._ggRung = LADDER.length - 1;
         // Winner drives the end screen, so map it onto the player's team.
         this.scoring.forceEnd(mine ? TEAM_A : TEAM_B, 'Ladder complete');
         this.banner(mine ? 'GUN GAME WON' : 'GUN GAME LOST',
-            mine ? '#5AD469' : '#FF4D4D', `${this.champion} · ${this.rungs}/${this.rungs}`);
+            mine ? '#5AD469' : '#FF4D4D', `${this.champion} · ${this.killTarget} kills`);
     }
 }
 

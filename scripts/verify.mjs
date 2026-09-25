@@ -180,6 +180,26 @@ await page.waitForFunction('window.__nuketown && window.__nuketown.state === "me
 timings['→ menu'] = { status: 200, cache: '-', enc: '-', bytes: 0, ms: Date.now() - t0 };
 log(`\n menu reachable in ${Date.now() - t0} ms`);
 
+// ── the first thing the game asks ───────────────────────────────────────────
+// How good should the other side be? Asked once, on a profile that has never
+// answered, with the way back named on the card. Picking an option has to dismiss
+// it and set the game's own state, not just paint a button.
+const gate = await race('the difficulty gate', () => page.evaluate(() => {
+    const el = document.getElementById('diffGate');
+    const shown = !!el && el.classList.contains('on');
+    const opts = el ? Array.from(el.querySelectorAll('.diffOpt')).map(b => b.dataset.id) : [];
+    const easy = document.querySelector('#diffGateOpts .diffOpt[data-id="easy"]');
+    if (easy) easy.click();
+    return { shown, opts, closed: !!el && !el.classList.contains('on'),
+        chip: (document.getElementById('menuDiffVal') || {}).textContent || '',
+        difficulty: window.__nuketown.difficulty };
+}), SLOW ? 60000 : 20000) || { error: 'not measured' };
+const gateAsked = !gate.error && gate.shown;
+log(`\n difficulty ask    ${gate.error ? 'could not be measured (' + gate.error + ')'
+    : (gate.shown ? 'asked on a fresh profile' : 'NOT ASKED — a first visit should see it')}` +
+    ` · options ${JSON.stringify(gate.opts || [])} · picked Easy → chip ${JSON.stringify(String(gate.chip).trim())}` +
+    ` · setting ${gate.difficulty} · card dismissed: ${gate.closed}`);
+
 // ── start a real match and let it run ───────────────────────────────────────
 await page.evaluate(() => {
     document.getElementById('btnStart').click();
@@ -374,13 +394,18 @@ const kills = await race('the kill-feedback checks', () => page.evaluate(async (
         scoreMoved: (() => { const before = G.player.kills; G.debugKill(false); return G.player.kills > before; })()
     };
 
-    // Gun Game: four rungs, and the kill you just scored swaps your gun
+    // Gun Game: 75 kills wins it, the ladder is four guns long, and the kill that
+    // takes you off the last gun has to put you back on the first — so plant the
+    // player one kill short of that loop and check the wrap, not just the step.
     G.setState('menu');
     document.querySelector('#modePick .mode[data-id=\"gun\"]').click();
     await G.startMatch();
     await until(() => G.state === 'playing' && G.gamemode.name === 'Gun Game' && G.bots.length > 0);
     const gg = G.gamemode;
     const gunBefore = p.current, rungBefore = p._ggRung | 0;
+    p._ggKills = gg.rungs - 1;
+    p._ggRung = p._ggKills;
+    const killsBefore = p._ggKills | 0;
     G.debugKill(false);
     // The mode asks for the gun; the rig grants it once the previous swap has
     // played out, so pump the player as well as the mode (player.update is what
@@ -390,7 +415,9 @@ const kills = await race('the kill-feedback checks', () => page.evaluate(async (
         gg.update(1 / 60);
     }
     out.gun = {
-        name: gg.name, rungs: gg.rungs,
+        name: gg.name, rungs: gg.rungs, target: gg.killTarget,
+        killsBefore, killsAfter: p._ggKills | 0, wrapped: (p._ggRung | 0) === 0,
+        ladderRung: gg.rung,
         hud: txt('#modePrimary'), next: txt('#modeLine'),
         rungBefore, rungAfter: p._ggRung | 0,
         gunBefore, gunAfter: p.current,
@@ -413,6 +440,16 @@ const kills = await race('the kill-feedback checks', () => page.evaluate(async (
     out.ctl = { name: ctl.name, round: ctl.round, phase: ctl.phase, ready: ctlUp,
         oneLife: ctl.canRespawn(G.player) === false };
 
+    // The difficulty the player picked at the menu has to be on the soldiers, not
+    // just on the chip — aimScale/spreadScale/reactionScale are what ai.js reads.
+    out.diff = { live: G.difficulty, aim: G.bots[0] ? +G.bots[0].aimScale.toFixed(2) : null,
+        spread: G.bots[0] ? +G.bots[0].spreadScale.toFixed(2) : null,
+        react: G.bots[0] ? +G.bots[0].reactionScale.toFixed(2) : null,
+        cap: G.bots[0] ? +G.bots[0].chanceCap.toFixed(2) : null,
+        skill: G.bots.map(b => +(b.skill || 0).toFixed(2)) };
+    // and the rest of the run is measured on the standard setting
+    G.setDifficulty('medium');
+
     // back to the mode the run started in, so the numbers below are comparable
     G.setState('menu');
     document.querySelector('#modePick .mode[data-id=\"tdm\"]').click();
@@ -431,10 +468,25 @@ if (kills.error) {
         `${kills.ffa.allOnTheMap} · team bars: ` +
         `${kills.ffa.teamBarsHidden ? 'hidden' : 'shown'} · streaks hidden: ${kills.ffa.streakColHidden} · ${kills.ffa.hud}`);
     log(` round control     opens on round ${kills.ctl && kills.ctl.round} · one life: ${kills.ctl && kills.ctl.oneLife}`);
-    log(` gun game          ${kills.gun.rungs} rungs · your kill moved rung ` +
-        `${kills.gun.rungBefore + 1} → ${kills.gun.rungAfter + 1} · weapon ${kills.gun.gunBefore} → ${kills.gun.gunAfter}` +
-        ` · no friendlies: ${kills.gun.nobodyOnYourTeam} · shootable: ${kills.gun.everyBotShootable}`);
+    log(` enemy skill       asked for: ${gateAsked ? 'yes (first visit)' : 'no'} · picked ${JSON.stringify(kills.diff && kills.diff.live)}` +
+        ` · on the soldiers: aim ×${kills.diff && kills.diff.aim}, spread ×${kills.diff && kills.diff.spread},` +
+        ` reaction ×${kills.diff && kills.diff.react}, cap ${kills.diff && kills.diff.cap}` +
+        ` · skill rolls ${kills.diff && JSON.stringify(kills.diff.skill.slice(0, 3))}…`);
+    log(` gun game          ${kills.gun.target} kills to win · ${kills.gun.rungs} guns cycling · your kill went` +
+        ` ${kills.gun.killsBefore} → ${kills.gun.killsAfter} and wrapped to gun ${kills.gun.rungAfter + 1}` +
+        ` (${kills.gun.wrapped ? 'lapped' : 'DID NOT WRAP'}) · weapon ${kills.gun.gunBefore} → ${kills.gun.gunAfter}` +
+        ` · hud ${JSON.stringify(kills.gun.hud)} · no friendlies: ${kills.gun.nobodyOnYourTeam}` +
+        ` · shootable: ${kills.gun.everyBotShootable}`);
 }
+// The gate is a promise about the bots, so check both halves: that it asked and
+// closed, and that the numbers it stands for are the ones ai.js reads.
+const diffOk = !gate.error && gate.shown && gate.opts.length === 3 && gate.closed
+    && gate.chip.trim().toLowerCase() === 'easy' && gate.difficulty === 'easy'
+    && !!kills.diff && kills.diff.live === 'easy'
+    && Math.abs(kills.diff.aim - 0.42) < 0.01 && Math.abs(kills.diff.spread - 2.3) < 0.01
+    && Math.abs(kills.diff.react - 2.1) < 0.01 && Math.abs(kills.diff.cap - 0.30) < 0.01
+    && kills.diff.skill.every(x => x >= 0.12 && x <= 0.30);
+
 const MEDALS = ['KILL', 'DOUBLE KILL', 'TRIPLE KILL', 'HEADSHOT'];
 const killsOk = !kills.error &&
     kills.medals.length >= 3 && MEDALS.every(m => kills.medals.some(x => x.includes(m))) &&
@@ -446,7 +498,8 @@ const killsOk = !kills.error &&
     kills.ffa.teamBarsHidden === true && kills.gun.nobodyOnYourTeam === true &&
     kills.gun.everyBotShootable === true &&
     kills.ffa.modeReady === true &&
-    kills.gun.rungs === 4 && kills.gun.rungAfter === kills.gun.rungBefore + 1 &&
+    kills.gun.rungs === 4 && kills.gun.target === 75 &&
+    kills.gun.killsAfter === kills.gun.killsBefore + 1 && kills.gun.wrapped === true &&
     kills.gun.gunAfter !== kills.gun.gunBefore && kills.gun.state === 'playing' &&
     kills.ffa.allBotsHostile === true &&
     kills.ctl.ready === true && kills.ctl.round === 1 && kills.ctl.oneLife === true;
@@ -549,6 +602,7 @@ log(`\n service worker    ${sw.unmeasured ? 'probe timed out — run again on a 
 const firstWire = net.wire, firstCached = net.cached, firstReqs = net.requests;
 const bytesBefore = bytes;
 let reloadMs = 0, reloadWire = 0, reloadProblem = '';
+let remembered = null;
 try {
     const tReload = Date.now();
     await page.reload({ waitUntil: 'domcontentloaded', timeout: SLOW ? 260000 : 90000 });
@@ -556,6 +610,12 @@ try {
         { timeout: SLOW ? 300000 : 120000, polling: 400 });
     reloadMs = Date.now() - tReload;
     reloadWire = net.wire - firstWire;
+    // Being asked once is the design; being asked every visit is a bug.
+    remembered = await page.evaluate(() => ({
+        gate: document.getElementById('diffGate').classList.contains('on'),
+        difficulty: window.__nuketown.difficulty,
+        chip: (document.getElementById('menuDiffVal') || {}).textContent.trim()
+    }));
 } catch (err) {
     // The repeat-visit number is the whole point of the service worker, so a page
     // that will not come back is a failure to report — never a reason to hang.
@@ -568,6 +628,8 @@ log(reloadProblem
     ? ` repeat visit      NOT MEASURED (${reloadProblem})`
     : ` repeat visit      menu in ${reloadMs} ms · ${(reloadWire / 1024).toFixed(0)} KB over the network` +
       ` · ${net.requests - firstReqs} requests, ${net.cachedReqs} of them answered from cache`);
+log(` remembered skill    ${remembered ? (remembered.gate ? 'ASKED AGAIN (should not be)' : `no ask — still ${remembered.difficulty}, chip ${JSON.stringify(remembered.chip)}`)
+    : 'not measured'}`);
 
 // ── 404 hunt ────────────────────────────────────────────────────────────────
 const missing = Object.entries(timings).filter(([, v]) => v.status >= 400);
@@ -591,7 +653,12 @@ log(` failed requests  ${failed.length ? '\n   ' + failed.join('\n   ') : 'none'
 log(` console errors   ${errors.length ? '\n   ' + errors.join('\n   ') : 'none'}`);
 log(` console warnings ${warnings.length ? '\n   ' + warnings.slice(0, 8).join('\n   ') : 'none'}`);
 
-const reloadOk = !reloadProblem && (!sw.registered || reloadWire < firstWire * 0.25);
+const reloadOk = !reloadProblem && (!sw.registered || reloadWire < firstWire * 0.25)
+    // the difficulty is a setting, so it has to survive a reload without an ask
+    // The run picked Easy at the gate and then switched to Medium mid-match, so a
+    // reload showing Medium is the proof that the setting is written, not just
+    // painted — and showing no gate at all is the proof it asks once.
+    && !!remembered && remembered.gate === false && remembered.difficulty === 'medium';
 const ok = errors.length === 0 && failed.length === 0 && missing.length === 0 &&
     report.scene.skinned > 0 && live.bots > 0 && report.assets.soldiers && report.assets.viewmodels &&
     reloadOk && specOk && killsOk;

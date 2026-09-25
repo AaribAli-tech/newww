@@ -100,6 +100,41 @@ canvas#gameCanvas{display:block;width:100vw;height:100vh}
 .menuBtn:hover{background:rgba(255,122,24,.16);border-color:var(--accent);color:#fff;letter-spacing:.38em}
 .menuBtn.primary{border-color:rgba(255,122,24,.7);color:var(--accent)}
 .menuBtn.primary:hover{background:var(--accent);color:#101010}
+#menuDiff{display:flex;align-items:center;gap:10px;margin:2px 0 16px;
+  font-family:'Barlow Condensed',sans-serif;font-size:12px;letter-spacing:.3em;
+  color:rgba(255,255,255,.45);text-transform:uppercase}
+#menuDiff b{color:var(--accent);font-size:14px;letter-spacing:.22em}
+#menuDiff button{background:none;border:0;border-bottom:1px solid rgba(255,255,255,.2);
+  color:rgba(255,255,255,.5);font:inherit;letter-spacing:.2em;text-transform:uppercase;
+  cursor:pointer;padding:0 0 1px}
+#menuDiff button:hover{color:#fff;border-color:var(--accent)}
+
+/* the first-run ask */
+#diffGate{position:fixed;inset:0;z-index:1200;display:none;align-items:center;justify-content:center;
+  background:rgba(3,5,8,.9)}
+#diffGate.on{display:flex}
+#diffGate .card{width:min(560px,92vw)}
+.gateSub{font-size:14px;color:rgba(255,255,255,.55);margin:6px 0 18px;letter-spacing:.02em}
+.diffOpts{display:flex;flex-direction:column;gap:8px}
+.diffOpt{display:grid;grid-template-columns:auto 1fr;gap:12px;align-items:baseline;text-align:left;
+  background:rgba(255,255,255,.03);border:1px solid rgba(255,255,255,.14);color:var(--ink);
+  padding:11px 15px;cursor:pointer;transition:background .14s,border-color .14s}
+.diffOpt:hover{background:rgba(255,122,24,.12);border-color:rgba(255,122,24,.55)}
+.diffOpt.on{border-color:var(--accent);background:rgba(255,122,24,.16)}
+.diffOpt h4{font-family:'Teko',sans-serif;font-size:22px;letter-spacing:.2em;text-transform:uppercase;
+  font-weight:500;margin:0}
+.diffOpt p{margin:0;font-size:12.5px;line-height:1.45;color:rgba(255,255,255,.5)}
+.diffOpt .tag{font-family:'Barlow Condensed',sans-serif;font-size:10px;letter-spacing:.3em;
+  color:rgba(255,255,255,.3);text-transform:uppercase}
+.gateSkip{margin-top:16px;background:none;border:0;color:rgba(255,255,255,.42);cursor:pointer;
+  font-family:'Barlow Condensed',sans-serif;font-size:12px;letter-spacing:.28em;text-transform:uppercase;
+  padding:4px 0}
+.gateSkip:hover{color:#fff}
+.diffSeg{display:flex;gap:6px}
+.diffSeg button{flex:1;background:rgba(255,255,255,.04);border:1px solid rgba(255,255,255,.16);
+  color:rgba(255,255,255,.7);font-family:'Barlow Condensed',sans-serif;font-size:13px;
+  letter-spacing:.24em;text-transform:uppercase;padding:7px 0;cursor:pointer}
+.diffSeg button.on{border-color:var(--accent);color:#fff;background:rgba(255,122,24,.18)}
 #menuFoot{position:absolute;bottom:26px;left:0;right:0;text-align:center;
   font-size:12px;letter-spacing:3px;color:rgba(255,255,255,.25);text-transform:uppercase}
 
@@ -528,11 +563,24 @@ canvas#gameCanvas{display:block;width:100vw;height:100vh}
     <div class="subrule"><i></i><span id="menuModeTag">Team Deathmatch</span><i></i></div>
     <div id="modePickLabel">Select playlist</div>
     <div id="modePick"></div>
+    <!-- How good the other side is. Asked once, then remembered — see #diffGate. -->
+    <div id="menuDiff"><span>Difficulty</span><b id="menuDiffVal">Medium</b>
+      <button id="btnDiffChange" type="button">change</button></div>
     <button class="menuBtn primary" id="btnStart">Deploy</button>
     <button class="menuBtn" id="btnControls">Controls</button>
     <button class="menuBtn" id="btnMute">Sound: On</button>
   </div>
   <div id="menuFoot">Nevada Atomic Test Site &nbsp;•&nbsp; 1962</div>
+</div>
+
+<!-- ════════ FIRST-DEPLOY ASK: EASY / MEDIUM / HARD ════════ -->
+<div id="diffGate">
+  <div class="card">
+    <h2>Choose your fight</h2>
+    <p class="gateSub">How good the enemy soldiers are. You can change it later in Controls.</p>
+    <div class="diffOpts" id="diffGateOpts"></div>
+    <button class="gateSkip" id="diffGateSkip" type="button">Just play — Medium</button>
+  </div>
 </div>
 
 <!-- ════════ CONTROLS / SETTINGS ════════ -->
@@ -559,6 +607,11 @@ canvas#gameCanvas{display:block;width:100vw;height:100vh}
       <label>Field of view</label>
       <input type="range" id="fovRange" min="65" max="105" value="78">
       <output id="fovOut">78</output>
+    </div>
+    <div class="rowSet">
+      <label>Enemy skill</label>
+      <div class="diffSeg" id="diffSeg"></div>
+      <output id="diffOut">They hit what they can see.</output>
     </div>
     <div class="rowSet">
       <label>Quality</label>
