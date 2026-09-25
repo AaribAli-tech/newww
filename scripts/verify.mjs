@@ -451,70 +451,79 @@ const killsOk = !kills.error &&
     kills.ffa.allBotsHostile === true &&
     kills.ctl.ready === true && kills.ctl.round === 1 && kills.ctl.oneLife === true;
 
-// ── spectating a teammate must be a third-person shot ───────────────────────
-// The bug this catches: the spectator camera used to be placed on the teammate's
-// own eye line — inside their head mesh — so a dead player in Round Control saw
-// the inside of a helmet instead of their squadmate. Two geometric assertions
-// make that impossible to regress: the camera has to sit several metres BEHIND
-// the operator's head, and the head has to be INSIDE the frame.
-const spec = await race('the spectator check', () => page.evaluate(() => {
+// ── dying in a round mode hands you the camera ──────────────────────────────
+// What this replaces: a chase cam bolted to a living teammate. It worked right up
+// until that teammate backed into a doorway and the camera ended up inside their
+// backpack, which is the whole argument for free roam — a camera that follows
+// nobody cannot get stuck. So the assertions are about the handover, not the
+// framing: the fall finishes before the view lifts off, the movement keys actually
+// move the camera, the focus jump frames somebody still alive, the death card gets
+// out of the way, and giving up the camera hands back the FOV it borrowed.
+const spec = await race('the free-roam check', () => page.evaluate(() => {
     const G = window.__nuketown;
     const p = G.player;
     if (!p) return { error: 'no player rig' };
-    // Round Control is the mode that keeps you down and makes you spectate. Rather
-    // than rebuilding the match to switch to it — which costs seconds when a frame
-    // does — flip the one property that path reads, and put it back at the end.
+    // Round Control is the mode that keeps you down. Rather than rebuilding the
+    // match to switch to it — seconds per frame on this machine — flip the one
+    // property the loop reads, and put it back at the end.
     const wasRespawn = G.gamemode.canRespawn;
     G.gamemode.canRespawn = () => false;
     for (const b of G.bots) if (b.team === p.team) b.health = 99999;
     p.paused = false;
     p.spawnProtect = 0;                   // spawn protection would eat the shot
+    const fovBefore = G.camera.fov;
     p.takeDamage(9999, 'VERIFY', { x: p.position.x + 3, y: 0, z: p.position.z + 3 });
     if (p.alive) { p.health = 0; p.alive = false; }
-    p.deathT = 3;                         // let the death collapse have finished (1.05 s)
-    for (let i = 0; i < 8; i++) G.spectateStep(1 / 60);
-    const t = G.specTarget;
-    G.gamemode.canRespawn = wasRespawn;
-    if (!t) return { error: 'no living teammate to watch' };
-    // what the framing search decided: `clear` false means every candidate was
-    // blocked by geometry and the one with the most air won — a wider shot, not a
-    // camera inside a wall
-    const framing = G.specInfo || { air: 0, clear: true, back: 0 };
-    const c = G.camera;
-    const hx = t.position.x, hy = t.position.y + 1.6, hz = t.position.z;
-    const dist = Math.hypot(c.position.x - hx, c.position.y - hy, c.position.z - hz);
-    const fx = -Math.sin(c.rotation.y) * Math.cos(c.rotation.x);
-    const fy = Math.sin(c.rotation.x);
-    const fz = -Math.cos(c.rotation.y) * Math.cos(c.rotation.x);
-    const vx = hx - c.position.x, vy = hy - c.position.y, vz = hz - c.position.z;
-    const vl = Math.hypot(vx, vy, vz) || 1;
-    return {
-        dist, facing: (vx * fx + vy * fy + vz * fz) / vl, near: c.near,
-        clear: framing.clear, air: framing.air,
-        raised: c.position.y - t.position.y, fov: Math.round(c.fov),
-        name: document.getElementById('specName').textContent.trim(),
-        banner: document.getElementById('spectate').classList.contains('on')
+    p.deathT = 3;                         // the collapse owns the view for 1.05 s
+    for (let i = 0; i < 8; i++) G.roamStep(1 / 60);
+    const up = G.roamInfo();
+    const start = { x: up.x, y: up.y, z: up.z };
+    G.roamKey('KeyW', true);
+    for (let i = 0; i < 24; i++) G.roamStep(1 / 60);
+    G.roamKey('KeyW', false);
+    const flew = G.roamInfo();
+    G.cycleFocus(1);
+    const foc = G.roamInfo();
+    const watched = G.bots.find(b => b.name === foc.focus);
+    const out = {
+        on: !!up.on, lifted: +(up.y - p.position.y).toFixed(2),
+        moved: +Math.hypot(flew.x - start.x, flew.y - start.y, flew.z - start.z).toFixed(2),
+        speed: flew.speed,
+        focusDist: watched ? +Math.hypot(G.camera.position.x - watched.position.x,
+            G.camera.position.y - (watched.position.y + 1.4),
+            G.camera.position.z - watched.position.z).toFixed(2) : -1,
+        focusAlive: !!watched && watched.alive === true,
+        name: (document.getElementById('specName') || {}).textContent || '',
+        hint: (document.getElementById('specHint') || {}).textContent || '',
+        banner: !!(document.getElementById('spectate') || { classList: { contains: () => false } }).classList.contains('on'),
+        cardGone: !(document.getElementById('death') || { classList: { contains: () => true } }).classList.contains('on'),
+        fov: Math.round(G.camera.fov), fovBefore: Math.round(fovBefore),
+        skip: !!(document.getElementById('skipRound') || {}).classList.contains('on')
     };
+    // and the other way round: alive again, the camera belongs to the player
+    G.roamExit();
+    out.fovRestored = Math.abs(G.camera.fov - fovBefore) < 0.5;
+    // put the match back: alive, able to respawn, no corpse for the bots to farm
+    p.alive = true; p.health = 100; p.deathT = 0;
+    G.gamemode.canRespawn = wasRespawn;
+    return out;
 }), SLOW ? 180000 : 45000) || { error: 'the page was too busy to answer' };
 
 if (spec.error) {
-    log(`\n spectator        could not be measured (${spec.error})`);
+    log(`\n free roam        could not be measured (${spec.error})`);
 } else {
-    log(`\n spectator        ${spec.dist.toFixed(2)} m behind ${JSON.stringify(spec.name)}` +
-        ` · target ${spec.facing > 0.5 ? 'in frame' : 'OUT OF FRAME'} · ${spec.raised.toFixed(2)} m above` +
-        ` their feet · fov ${spec.fov} · banner ${spec.banner ? 'on' : 'off'}` +
-        ` · framing ${spec.clear ? 'clear' : 'widened (nothing was clear, air ' + spec.air + ' m)'}`);
+    log(`\n free roam        ${spec.on ? 'camera released' : 'STILL LOCKED'} · lifted ${spec.lifted} m off the`
+        + ` corpse · ${spec.moved} m flown at ${spec.speed} m/s · focus ${spec.focusDist} m from`
+        + ` ${JSON.stringify(spec.name.trim())}${spec.focusAlive ? '' : ' (nobody alive)'} · card ${spec.cardGone ? 'out of' : 'in'}`
+        + ` the way · fov ${spec.fov}→${spec.fovBefore} · banner ${spec.banner ? 'on' : 'off'}`);
 }
-// third person = clearly behind the head, head inside the frame, not clipped by the
-// near plane. Anything tighter and this is a first-person camera again.
-// A camera closer than four near planes is not inside the soldier it is watching;
-// and when the search claims a clear framing, the height it framed at has to match
-// that claim — a widened shot is allowed to sit higher, on purpose.
-const specOk = !spec.error && spec.dist > 1.6 && spec.facing > 0.5 && spec.dist > spec.near * 4
-    && spec.banner
-    // when the search claims a clear framing it has to have the air it asked for;
-    // a widened shot is allowed to sit wherever the widest candidate could go
-    && (!spec.clear || spec.air >= 2.0);
+// The camera must be ours, it must go somewhere when a movement key is held, the
+// focus jump must land next to somebody still breathing (or on an empty map, which
+// is the same thing as nobody to frame), and the strip has to say FREE ROAM rather
+// than the name of a teammate we are no longer chained to.
+const specOk = !spec.error && spec.on && spec.moved > 0.4 && spec.banner && spec.cardGone
+    && spec.skip && spec.fovRestored && /free roam|watching/i.test(spec.name)
+    && (spec.focusDist < 0 || (spec.focusDist < 12 && spec.focusAlive));
 
 // ── repeat visit: the shell cache should turn this into a disk read ─────────
 const sw = await race('the service-worker probe', () => page.evaluate(async () => {

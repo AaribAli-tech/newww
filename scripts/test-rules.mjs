@@ -356,5 +356,113 @@ group('hud.js — mode panels at match start');
     ok('nothing else toggles the team bars', (hud.match(/el\.teamBars\.classList/g) || []).length === 1);
 }
 
+// ── 10. the free-roam camera is the whole dead-player experience now ────────
+// freeroam.js is written without three.js or the DOM on purpose: everything below
+// runs the real code, not a regex over it. The behaviour that matters is that keys
+// go somewhere, that nothing can fly you out of the world, and that a focus jump
+// actually frames the operator it jumped to.
+group('freeroam.js — flying the camera');
+{
+    const { createFreeRoam, ROAM } = await import('../src/js/freeroam.js');
+    const step = (r, n, dt = 1 / 60) => { for (let i = 0; i < n; i++) r.update(dt, null); return r.pos; };
+
+    let r = createFreeRoam();
+    r.enter(null);
+    r.key('KeyW', true);
+    step(r, 40);
+    ok('holding W flies along the view, and yaw 0 looks down -Z', r.pos.z < -1 && Math.abs(r.pos.x) < 1e-6,
+        `z=${r.pos.z.toFixed(2)}`);
+    ok('the camera never leaves the floor or the ceiling', r.pos.y >= ROAM.floor - 1e-6 && r.pos.y <= ROAM.ceil + 1e-6);
+
+    r = createFreeRoam(); r.enter(null);
+    r.key('KeyS', true); step(r, 40);
+    ok('S reverses', r.pos.z > 1, `z=${r.pos.z.toFixed(2)}`);
+
+    r = createFreeRoam(); r.enter(null); r.yaw = Math.PI / 2;
+    r.key('KeyW', true); step(r, 40);
+    ok('turning the yaw turns the flight path', r.pos.x < -1 && Math.abs(r.pos.z) < 1, `x=${r.pos.x.toFixed(2)}`);
+
+    r = createFreeRoam(); r.enter(null);
+    r.key('Space', true); step(r, 30);
+    ok('Space gains height, and stops at the ceiling', r.pos.y > ROAM.floor && r.pos.y <= ROAM.ceil + 1e-6);
+    r.key('Space', false); r.key('KeyC', true); step(r, 600);
+    ok('C sinks back to the floor and no further', Math.abs(r.pos.y - ROAM.floor) < 1e-6, `y=${r.pos.y.toFixed(2)}`);
+
+    r = createFreeRoam(); r.enter(null);
+    const b = r.bounds;
+    r.key('KeyW', true); r.key('KeyD', true); step(r, 4000);
+    ok('you cannot fly off the map', r.pos.x <= b.maxX + 1e-6 && r.pos.z >= b.minZ - 1e-6, JSON.stringify(r.pos));
+
+    const dist = rr => { rr.enter(null); rr.key('ShiftLeft', true); rr.key('KeyW', true); step(rr, 30); return Math.abs(rr.pos.z); };
+    const sprint = dist(createFreeRoam());
+    let walk = 0;
+    { const w = createFreeRoam(); w.enter(null); w.key('KeyW', true); step(w, 30); walk = Math.abs(w.pos.z); }
+    ok('Shift is a sprint, and a real one', sprint > walk * 1.8, `${sprint.toFixed(1)} vs ${walk.toFixed(1)}`);
+
+    r = createFreeRoam({ accel: 6, speed: 4 });
+    r.enter(null); r.key('KeyW', true);
+    for (let i = 0; i < 60; i++) r.update(1 / 60, null);
+    const oneWay = { ...r.pos };
+    const r2 = createFreeRoam({ accel: 6, speed: 4 });
+    r2.enter(null); r2.key('KeyW', true);
+    for (let i = 0; i < 120; i++) r2.update(1 / 120, null);
+    ok('flight is frame-rate independent (120 Hz matches 60 Hz)',
+        Math.abs(oneWay.z - r2.pos.z) < 0.05, `${oneWay.z.toFixed(3)} vs ${r2.pos.z.toFixed(3)}`);
+
+    r = createFreeRoam(); r.enter(null);
+    r.look(300, 0); const yawA = r.yaw;
+    r.look(-300, 0);
+    ok('mouse look is clamped and reversible', Math.abs(yawA) > 0.1 && Math.abs(r.yaw) < 1e-6);
+    r.look(0, 1e6);
+    ok('a huge mouse delta cannot flip the camera upside down', Math.abs(r.pitch) <= ROAM.pitchLimit + 1e-9);
+
+    r = createFreeRoam(); r.enter(null);
+    r.focusOn({ position: { x: 4, y: 0, z: -6 }, yaw: 0, name: 'BOB' }, null);
+    const d = Math.hypot(r.pos.x - 4, r.pos.z + 6);
+    ok('a focus jump parks you behind the operator', d > 3 && d < ROAM.focusBack + 0.6, `d=${d.toFixed(2)}m`);
+    ok('…and remembers who it framed, so the strip can name them', r.watching && r.watching.name === 'BOB');
+    ok('…and looks down at their chest rather than past the horizon',
+        r.pitch < -0.05 && r.pitch > -0.7, `pitch=${r.pitch.toFixed(2)}`);
+    ok('the wide spectator FOV comes back when the camera is handed over', (() => {
+        let fov = 0;
+        const cam = { position: { set(x, y, z) { fov = fov; } }, rotation: { order: '', set() {} }, fov: 78,
+            updateProjectionMatrix() {} };
+        const q = createFreeRoam(); q.enter(cam); q.apply(cam); fov = cam.fov;
+        q.exit(cam);
+        return fov === ROAM.fov && cam.fov === 78;
+    })());
+}
+
+group('main.js / hud.js — the handover, and not painting over the game');
+{
+    const main = await readFile(new URL('../src/js/main.js', import.meta.url), 'utf8');
+    const hud = await readFile(new URL('../src/js/hud.js', import.meta.url), 'utf8');
+    const html = await readFile(new URL('../src/index.html', import.meta.url), 'utf8');
+    ok('the roam camera takes the view only after the death fall ends',
+        /if \(!player\.alive && player\.deathProgress < 1\) return;[\s\S]{0,260}roam\.enter\(camera\)/.test(main));
+    ok('the loop hands the camera back as soon as the player is alive',
+        /if \(player\.alive\) \{\s*\n\s*if \(roam\.active\) exitFreeRoam\(\);/.test(main));
+    ok('a match start, a menu and a result card all end the flight',
+        (main.match(/exitFreeRoam\(\);/g) || []).length >= 5);
+    ok('the flight keys are read off one list so nothing leaks through',
+        /const ROAM_KEYS = new Set\(/.test(main) && /ROAM_KEYS\.has\(e\.code\)/.test(main));
+    ok('the death card gets out of the way of the view', /hud\.hideDeath\(\);\s*\n\s*hud\.freeRoam\(true/.test(main));
+    ok('the strip says what the keys do, not whose eyes you are in',
+        /freeRoam\(on, focus = '', killedBy = ''\)/.test(hud) && !/Spectating <b>/.test(hud));
+    ok('the map stopped scattering human silhouettes across the lawns', !/mannequin\(/.test(html) &&
+        !/mannequin\(/.test(await readFile(new URL('../src/js/map.js', import.meta.url), 'utf8')));
+    // The tab-closing bug: a viewport-sized backdrop blur of a live WebGL canvas
+    // is the most expensive composite the browser can be asked for, and it appears
+    // at exactly the moment a victory card goes up. Losing the GPU context is the
+    // other half — without preventDefault the page tailspins on a dead canvas.
+    const overlay = html.slice(html.indexOf('.overlay{'), html.indexOf('.overlay.on'));
+    ok('no full-screen card blurs the live canvas', !/backdrop-filter:blur/.test(overlay));
+    ok('no overlay animation runs a filter over the whole viewport',
+        !/@keyframes diedIn\{[^}]*filter:blur/.test(html.replace(/\n\s*/g, '')));
+    ok('a lost GL context is caught, stopped and explained',
+        /addEventListener\('webglcontextlost'/.test(main) && /e\.preventDefault\(\)/.test(main)
+        && /if \(glLost\) return;/.test(main));
+}
+
 console.log(`\n${fail === 0 ? '✓' : '✗'} ${pass} passed, ${fail} failed\n`);
 process.exit(fail === 0 ? 0 : 1);

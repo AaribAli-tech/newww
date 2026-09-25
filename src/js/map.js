@@ -851,32 +851,13 @@ function fireStation() {
 // ============================================================================
 // PROPS
 // ============================================================================
-function mannequin(x, z, rotY, pose = 0) {
-    const m = M.mannequinPlastic();
-    const g = new THREE.Group();
-    const p = (geo, px, py, pz, rx = 0, rz = 0) => {
-        const mm = new THREE.Mesh(geo, m);
-        mm.position.set(px, py, pz); mm.rotation.set(rx, 0, rz);
-        mm.castShadow = true; g.add(mm);
-    };
-    p(new THREE.CylinderGeometry(0.075, 0.09, 0.78, 8), -0.09, 0.39, 0);
-    p(new THREE.CylinderGeometry(0.075, 0.09, 0.78, 8), 0.09, 0.39, 0);
-    p(new THREE.CylinderGeometry(0.17, 0.14, 0.24, 10), 0, 0.88, 0);
-    const torso = new THREE.Mesh(new THREE.CylinderGeometry(0.155, 0.19, 0.62, 10), m);
-    torso.position.set(0, 1.30, 0); torso.castShadow = true; g.add(torso);
-    p(new THREE.SphereGeometry(0.115, 12, 10), 0, 1.72, 0);
-    p(new THREE.CylinderGeometry(0.055, 0.06, 0.16, 8), 0, 1.60, 0);
-    const armGeo = new THREE.CylinderGeometry(0.05, 0.055, 0.62, 8);
-    if (pose === 0) { p(armGeo, -0.24, 1.28, 0, 0, 0.14); p(armGeo, 0.24, 1.28, 0, 0, -0.14); }
-    else if (pose === 1) { p(armGeo, -0.26, 1.30, 0, 0, 0.2); p(armGeo, 0.32, 1.55, 0, 0, -1.15); }
-    else { p(armGeo, -0.36, 1.50, 0, 0, 1.1); p(armGeo, 0.36, 1.50, 0, 0, -1.1); }
-
-    g.position.set(x * CTX.s, 0, z);
-    g.rotation.y = rotY * CTX.s;
-    CTX.scene.add(g);
-    CTX.cw.addAABB(x * CTX.s - 0.3, 0, z - 0.3, x * CTX.s + 0.3, 1.55, z + 0.3, 'mannequin');
-}
-
+// The crash-test mannequins Nuketown used to be littered with are gone on
+// purpose. Seven human silhouettes — 1.7 m tall, arms up, standing in the open on
+// a lawn — are indistinguishable from an enemy at 30 m for the half-second it
+// takes to read a shape, and in a shooter that half-second is spent shooting or
+// being shot. Their collision boxes went with them, so the lawn is now simply
+// lawn. If the blast-dressing idea is ever wanted back, it wants a silhouette no
+// one mistakes for a soldier: a wrecked car door, a toppled chair, sandbags.
 function picketRun(x0, z0, x1, z1) {
     // one alpha-cut panel instead of dozens of little boards
     if (!picketRun.mat) {
@@ -1190,10 +1171,6 @@ function frontYard(mats) {
     box(0.8, 0.08, 0.8, 16.6, 0.72, -8.2, mats.wood, { tag: 'prop' });
     for (const [ox, oz] of [[16.25, -8.5], [16.95, -8.5], [16.25, -7.9], [16.95, -7.9]])
         deco(0.07, 0.4, 0.07, ox, 0.5, oz, mats.wood, { cast: false });
-    // lawn mannequins
-    mannequin(13.6, -11.6, 1.2, 1);
-    mannequin(14.9, -12.3, -0.6, 0);
-    mannequin(12.2, 6.2, 2.6, 2);
 }
 
 function backYard(mats) {
@@ -1213,12 +1190,6 @@ function backYard(mats) {
         deco(0.02, 0.6, 0.5, 35.6, 1.85, -2.0 + i * 1.35,
             M.plain([0xd8d2c0, 0xa9b4bd, 0xc2a89a, 0xb9c0a8][i], 0.9, 0), { cast: false });
     }
-    // mannequin family staged for the blast, tucked against the house so the
-    // spawn points behind them stay clear
-    mannequin(29.6, -8.5, 0.4, 0);
-    mannequin(30.4, -7.6, -0.9, 1);
-    mannequin(29.4, 5.2, 2.4, 2);
-    mannequin(30.6, 6.2, 1.1, 0);
     // barbecue + drums
     cylinder(0.42, 0.36, 0.35, 12, 30.6, 0.95, 6.8, M.plain(0x2f3234, 0.5, 0.6), { solid: true, tag: 'prop' });
     for (const a of [0, 2.1, 4.2]) {

@@ -532,13 +532,6 @@ export const bootLeather = () => surface('boot', (ctx, s) => {
     scratches(ctx, s, 30, 'rgba(140,120,90,0.25)', 0.7, 16);
 }, { repeat: 1, rough: [0.6, 0.9], normalScale: 0.8, normalStrength: 3 });
 
-export const mannequinPlastic = () => surface('mannequin', (ctx, s) => {
-    fill(ctx, s, '#d9c3a4');
-    grain(ctx, s, 8);
-    blobs(ctx, s, 30, 4, 14, ['rgba(160,135,105,0.18)'], 1);
-    scratches(ctx, s, 20, 'rgba(120,100,80,0.3)', 0.6, 18);
-}, { repeat: 1, rough: [0.3, 0.55], normalScale: 0.25 });
-
 // ============================================================================
 // SPECIAL
 // ============================================================================

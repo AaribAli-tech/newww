@@ -817,27 +817,29 @@ export class HUD {
     hideDeath() { this.el.death.classList.remove('on'); }
 
     /**
-     * Spectator banner. Pass null to clear it.
-     * Also drives the skip-round button, which is only meaningful while dead.
+     * The free-roam strip, shown while you are dead in a mode that cannot respawn
+     * you. It used to say "Spectating BOB" because the camera was bolted to BOB;
+     * now the camera is yours, so the strip carries the two things you cannot see
+     * for yourself — who got you, and what the keys do. Also drives the skip-round
+     * button, which is only reachable while you are down.
      */
-    spectate(name, count) {
+    freeRoam(on, focus = '', killedBy = '') {
         const box = $('spectate'), skip = $('skipRound');
-        if (!name) {
+        if (!on) {
             if (box) box.classList.remove('on');
             if (skip) skip.classList.remove('on');
             return;
         }
-        if (box) {
-            box.classList.add('on');
-            const n = $('specName');
-            if (n && n.dataset.who !== name) {
-                n.dataset.who = name;
-                n.innerHTML = `Spectating <b>${name}</b>`;
-            }
-            const h = $('specHint');
-            if (h) h.textContent = count > 1 ? 'Click to switch operator' : 'Last operator standing';
-        }
         if (skip) skip.classList.add('on');
+        if (!box) return;
+        box.classList.add('on');
+        const n = $('specName');
+        if (n) n.innerHTML = focus ? `Watching <b>${focus}</b>` : 'Free roam';
+        const h = $('specHint');
+        if (h) {
+            h.textContent = (killedBy && killedBy !== '—' ? `Taken down by ${killedBy} · ` : '')
+                + 'WASD fly · Shift sprint · Space up / C down · right-click or J focus';
+        }
     }
 
     /** `result` is the mode's result() object: {title, subtitle}. Optional. */

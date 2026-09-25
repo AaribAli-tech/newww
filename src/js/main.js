@@ -15,6 +15,7 @@ import { KillChain, milestoneFor, milestoneProgress } from './medals.js';
 import { createMode, MODES } from './modes.js';
 import { selectedMode as pickedMode, onModeChange } from './hud.js';
 import { createPostFX } from './shaders.js';
+import { createFreeRoam } from './freeroam.js';
 import { characterAssets } from './character.js';
 import { vmAssets, vmAssetsReady } from './vmassets.js';
 import { upgradeTextures, photoStatus } from './materials.js';
@@ -57,6 +58,8 @@ let qualityHeadroom = 0, autoQualityLocked = false;
 const dprCooldownStep = 1.0;
 let fpsAccum = 0, fpsFrames = 0;
 let respawnTimer = 0;
+let roamTicks = 0;                 // how many frames the roam camera has been asked for
+let glLost = false;                // set by the canvas' webglcontextlost handler
 // Chained kills (double/triple/multi) and the streak-name ladder. Kept out here
 // rather than on Player so the death/respawn paths can clear them together.
 const killChain = new KillChain();
@@ -100,10 +103,6 @@ function saveSettings() {
 }
 
 const _v = new THREE.Vector3();
-const _specFrom = new THREE.Vector3();
-const _specWant = new THREE.Vector3();
-const _specDir = new THREE.Vector3();
-const _specAlt = new THREE.Vector3();
 
 // A missing GPU blocklist entry or a disabled "hardware acceleration" flag used to
 // mean an eternal loading bar. Say what is wrong instead.
@@ -244,6 +243,26 @@ function setupRenderer() {
 
     camera = new THREE.PerspectiveCamera(78, window.innerWidth / window.innerHeight, 0.06, 700);
     scene.add(camera);
+
+    // A lost WebGL context is Chrome taking the canvas away — a driver reset, a
+    // backgrounded tab on a machine that ran out of GPU memory, a blacklisted
+    // driver. Left alone, every call three.js makes afterwards returns
+    // CONTEXT_LOST, and the page becomes an error log at 144 Hz until the tab is
+    // killed. `preventDefault` is what buys us the restore event; stopping the loop
+    // is what stops the tail-spin; the loader card is what tells the player to
+    // press F5 instead of wondering whether the game ate their save.
+    canvas.addEventListener('webglcontextlost', e => {
+        e.preventDefault();
+        glLost = true;
+        showBootError('The graphics driver dropped this tab',
+            'Chrome lost the WebGL context, usually after a driver reset or the GPU running out of memory. '
+            + 'Reload to play again — your settings and sensitivity are saved.');
+    }, false);
+    canvas.addEventListener('webglcontextrestored', () => {
+        // three.js cannot rebuild what it had already uploaded, so the honest
+        // answer is a reload — but say it once rather than leaving a black canvas.
+        showBootError('Context restored — reload to continue', 'Press Reload, or hit Enter.', true);
+    }, false);
 }
 
 function setupWorld() {
@@ -362,8 +381,6 @@ function finishBoot() {
         get player() { return player; },
         get bots() { return bots; },
         get camera() { return camera; },
-        get specTarget() { return specTarget; },
-        cycleSpectate,
         /**
          * Run the real kill path for one synthetic kill, so the browser harness can
          * assert what a kill does to the HUD (medals, feed, streak strip, score)
@@ -371,12 +388,21 @@ function finishBoot() {
          * rasteriser. `registerKill` is the same function a hit calls.
          */
         debugKill: (head = false, name = 'TEST') => registerKill({ name: name || 'TEST' }, 'M4A1', !!head, false),
-        // one frame of the spectator camera, callable without rendering —
-        // scripts/verify.mjs asserts on the shot this produces
-        spectateStep: updateSpectator,
-        // how the framing search ended: `clear` false means every candidate was
-        // blocked and the widest one won, which is the intended fallback
-        get specInfo() { return { air: +specAir.toFixed(2), clear: specClear, back: +specBack.toFixed(2) }; },
+        // one frame of the free-roam camera, callable without rendering —
+        // scripts/verify.mjs asserts on what it does
+        get roamTicks() { return roamTicks; },
+        roamStep: updateFreeRoam,
+        roamKey: (code, down) => roam.key(code, !!down),
+        roamExit: exitFreeRoam,
+        cycleFocus,
+        roamInfo() {
+            return {
+                on: roam.active, x: +roam.pos.x.toFixed(2), y: +roam.pos.y.toFixed(2), z: +roam.pos.z.toFixed(2),
+                yaw: +roam.yaw.toFixed(3), pitch: +roam.pitch.toFixed(3),
+                speed: +roam.speedNow.toFixed(2), focus: roam.watching ? roam.watching.name : null,
+                held: Object.keys(roam.keys).filter(k => roam.keys[k])
+            };
+        },
         // the imported FBX soldier: what loaded, and which side wears it
         rebel: () => rebelInfo(),
         setRebel: (m) => setRebelMode(m),
@@ -507,25 +533,47 @@ function bindUI() {
         }
         if (e.code === 'Tab' && state === 'playing') { e.preventDefault(); boardOpen = true; }
         if (e.code === 'KeyF') $('perfHud').classList.toggle('hidden');
-        // spectator: space or A/D also cycle, for anyone who does not want to click
-        if (specTarget && (e.code === 'Space' || e.code === 'KeyD')) cycleSpectate(1);
-        else if (specTarget && e.code === 'KeyA') cycleSpectate(-1);
+        // Free roam owns the movement keys while it is up — Space is "fly", not
+        // "jump", and A/D strafe instead of changing who you watch. `J`/`K` and a
+        // right-click are the only way to hop to another operator.
+        if (roam.active) {
+            if (ROAM_KEYS.has(e.code)) {
+                roam.key(e.code, true);
+                e.preventDefault();          // Space would scroll the page, Tab the UI
+            }
+            if (e.code === 'KeyJ') cycleFocus(1);
+            else if (e.code === 'KeyK') cycleFocus(-1);
+        }
     });
+    window.addEventListener('keyup', e => { if (roam.active && ROAM_KEYS.has(e.code)) roam.key(e.code, false); });
 
-    // Click while spectating moves to the next surviving teammate. Bound on the
-    // canvas so it does not fire when the skip button itself is clicked.
+    // In free roam the mouse is for looking, so the focus jump lives on the right
+    // button. Bound on the canvas so it does not fire when the skip button is used.
     canvas.addEventListener('mousedown', e => {
-        if (state !== 'playing' || player.alive || !specTarget) return;
-        cycleSpectate(e.button === 2 ? -1 : 1);
+        if (state !== 'playing' || !roam.active) return;
+        if (e.button === 2) cycleFocus(1);
+        else if (e.button === 1) cycleFocus(-1);
+    });
+    // The player's own look handler bails while it is dead, which is exactly when
+    // the roam camera needs these deltas.
+    window.addEventListener('mousemove', e => {
+        if (!roam.active || document.pointerLockElement !== canvas || player.paused) return;
+        roam.look(Math.max(-LOOK_CLAMP, Math.min(LOOK_CLAMP, e.movementX || 0)),
+                  Math.max(-LOOK_CLAMP, Math.min(LOOK_CLAMP, e.movementY || 0)), settings.sens);
     });
 
     $('skipRound').addEventListener('click', () => {
         if (gamemode.skipRound && gamemode.skipRound()) {
             hud.banner('ROUND SKIPPED', '#FFC24A', 'Next round starting');
-            endSpectate();
+            exitFreeRoam();
         }
     });
     window.addEventListener('keyup', e => { if (e.code === 'Tab') boardOpen = false; });
+    // Keys the roam camera swallows. Anything else still reaches the normal
+    // handlers, so the scoreboard and the perf strip work mid-flight.
+    const ROAM_KEYS = new Set(['KeyW', 'KeyA', 'KeyS', 'KeyD', 'Space', 'KeyC', 'KeyE', 'KeyQ',
+        'ShiftLeft', 'ShiftRight', 'ControlLeft', 'ControlRight', 'ArrowUp', 'ArrowDown',
+        'ArrowLeft', 'ArrowRight']);
 
     window.addEventListener('resize', onResize);
 }
@@ -701,6 +749,7 @@ function startMatch() {
     player.paused = false;
     respawnTimer = 0;
     deadInfo = null;
+    exitFreeRoam();        // a fresh match starts in your own body, not in the air
 
     state = 'playing';
     grabPointer();
@@ -716,6 +765,7 @@ function startMatch() {
 
 function toMenu() {
     state = 'menu';
+    exitFreeRoam();
     hud.show(false);
     hud.hideDeath();
     hud.hideEnd();
@@ -740,6 +790,10 @@ function endMatch() {
     player.paused = true;
     document.exitPointerLock();
     hud.hideDeath();
+    // The result card is the end of the flight: give the camera back so the frozen
+    // last frame is the game's own view, and so nothing keeps integrating movement
+    // behind a full-screen overlay.
+    exitFreeRoam();
     const won = gamemode.winner === TEAM_A;
     hud.showEnd(won, player);
     (won ? A.playVictory : A.playDefeat)();
@@ -864,132 +918,52 @@ function handleBotEvents(bot, events) {
     }
 }
 
-// ── spectator (round modes) ─────────────────────────────────────────────────
-// Dead in a one-life round? You watch a surviving teammate. Click to move to the
-// next one.
-//
-// This is a THIRD PERSON shot: the camera hangs behind and above the operator,
-// aimed the way they are aimed, so you can read their position, their animation
-// and who they are shooting. It used to sit exactly on their eye line, which put
-// the head mesh inside the near plane — all you got was the inside of a helmet
-// and a dark blob where a teammate should have been.
-let specAir = 0, specClear = false, specBack = 0;
+// ── free roam (round modes) ─────────────────────────────────────────────────
+// Killed with no respawn left? You do not inherit a teammate's eyes — you leave
+// your body and fly. Counter-Strike has let a dead player drift around the map
+// since forever, and for good reason: it is the only spectator mode that never
+// breaks, because there is no camera to thread through a doorway behind someone.
+// All the movement maths lives in freeroam.js; everything here is the handover —
+// who owns the camera, when, and which keys reach it.
+const roam = createFreeRoam();
+const LOOK_CLAMP = 180;         // px per mouse event, the same spike guard the player uses
 
-const SPEC_BACK = 4.1;        // metres behind the operator
-const SPEC_UP = 0.95;         // metres above their head
-const SPEC_SHOULDER = 0.55;   // offset so the back of the head does not fill the frame
-const SPEC_CLEAR = 2.1;       // metres of air a framing wants behind the head
-const SPEC_MIN = 1.15;        // never closer than this, or you are inside the helmet
-// Candidate shots, best first: back distance, lift, sideways offset. The wide
-// and high ones exist for the case the plain chase cam cannot serve — a teammate
-// with a wall right behind them.
-const SPEC_TRIES = [
-    { back: SPEC_BACK, up: SPEC_UP, side: SPEC_SHOULDER },
-    { back: SPEC_BACK, up: SPEC_UP, side: -SPEC_SHOULDER },
-    { back: 2.95, up: 1.95, side: SPEC_SHOULDER * 1.6 },
-    { back: 5.6, up: 1.45, side: SPEC_SHOULDER * 2.4 }
-];
-let specTarget = null;
-let specSnap = true;   // jump to the pose instead of sliding there
-let specLive = false;  // has the chase cam taken over from the death fall yet
+function roamName() { return roam.watching ? roam.watching.name : ''; }
 
-function livingTeammates() {
-    return bots.filter(b => b.team === player.team && b.alive);
+/** Who `J` can jump to: everyone still standing, both teams. */
+function roamTargets() {
+    return bots.filter(b => b.alive && b !== playerProxy).sort((x, y) => x.name.localeCompare(y.name));
 }
 
-function cycleSpectate(dir = 1) {
-    const mates = livingTeammates();
-    if (!mates.length) { specTarget = null; return; }
-    const i = mates.indexOf(specTarget);
-    const next = mates[(((i < 0 ? 0 : i + dir) % mates.length) + mates.length) % mates.length];
-    if (next !== specTarget) specSnap = true;
-    specTarget = next;
+function exitFreeRoam() {
+    if (!roam.active) return;
+    roam.exit(camera);
+    hud.freeRoam(false);
 }
 
-function updateSpectator(dt = 0.016) {
-    // The death collapse owns the camera for its first second. Cutting to a
-    // teammate mid-fall — while both systems write camera.position on the same
-    // frame — is the other half of why this view looked broken, so wait for the
-    // fall to finish and then make one clean cut.
-    if (!player.alive && player.deathProgress < 1) { specLive = false; return; }
-    if (!specLive) { specLive = true; specSnap = true; }
+/** Cycle the focus jump. `dir` 0 re-frames whoever we are already watching. */
+function cycleFocus(dir = 1) {
+    const list = roamTargets();
+    if (!list.length) { roam.watching = null; hud.freeRoam(true, '', deadInfo && deadInfo.by); return; }
+    const i = list.indexOf(roam.watching);
+    const next = list[(((i < 0 ? -1 : i) + dir) % list.length + list.length) % list.length];
+    roam.focusOn(next, camera);   // method — it records the target on roam.watching
+    hud.freeRoam(true, next.name, deadInfo && deadInfo.by);
+}
 
-    const mates = livingTeammates();
-    if (!mates.length) {
-        specTarget = null;
-        hud.spectate(null);
-        return;
+function updateFreeRoam(dt = 0.016) {
+    roamTicks++;
+    // The death collapse owns the camera for its first second. Lifting off early
+    // is the difference between "I died and flew" and "my view glitched".
+    if (!player.alive && player.deathProgress < 1) return;
+    if (!roam.active) {
+        roam.enter(camera);
+        // The big red card has done its job — you know who got you, and the strip
+        // at the bottom keeps saying it. Now let you see the map you are flying over.
+        hud.hideDeath();
+        hud.freeRoam(true, '', deadInfo && deadInfo.by);
     }
-    // whoever we were watching may have just died
-    if (!specTarget || !specTarget.alive) cycleSpectate(0);
-    const t = specTarget;
-    if (!t) return;
-
-    const yaw = t.yaw || 0;
-    const pitch = t.aimPitch || 0;
-    _specFrom.set(t.position.x, t.position.y + (t.eyeY || (t.isCrouching ? 1.02 : 1.58)) + 0.06, t.position.z);
-
-    // "forward" in this game's convention (yaw 0 looks down -Z), lifted by their
-    // aim pitch so the shot tracks a soldier looking over a roof or down stairs
-    const cp = Math.cos(pitch);
-    const fx = -Math.sin(yaw) * cp, fz = -Math.cos(yaw) * cp, fy = Math.sin(pitch);
-    // Pick a framing that actually has room. A wall or doorframe behind the
-    // operator used to pull the camera in until it sat inside their backpack,
-    // which is worse than useless — you saw nothing at all. So instead of
-    // shrinking the one shot we had, walk the candidates and keep the first one
-    // that is both far enough away and clear of geometry; if none of them are,
-    // take the one with the most air.
-    //
-    // Visual meshes are merged, but collision is per-AABB, which is exactly what
-    // a spectator cam wants to test against.
-    let found = false, best = -1, bestWant = 0, clear = false;
-    for (let i = 0; i < SPEC_TRIES.length; i++) {
-        const f = SPEC_TRIES[i];
-        _specAlt.set(
-            _specFrom.x - fx * f.back + Math.cos(yaw) * f.side,
-            _specFrom.y - fy * f.back + f.up,
-            _specFrom.z - fz * f.back - Math.sin(yaw) * f.side
-        );
-        _specDir.subVectors(_specAlt, _specFrom);
-        const want = _specDir.length();
-        if (want < SPEC_MIN) continue;
-        _specDir.multiplyScalar(1 / want);
-        const hit = cw && cw.raycast ? cw.raycast(_specFrom, _specDir, want) : null;
-        const air = hit ? Math.min(hit.distance, want) : want;
-        if (!found || air > best) {
-            found = true; best = air; bestWant = want;
-            _specWant.copy(_specAlt);
-        }
-        if (!hit || (air >= want - 0.001 && air >= SPEC_CLEAR)) { clear = true; break; }
-    }
-    // what the search settled on, for the console and for scripts/verify.mjs: a
-    // shot that had to widen is not a bug, while a camera buried in a wall is
-    specAir = best; specClear = clear; specBack = bestWant;
-    // Should not happen — the widest candidate always has somewhere to stand —
-    // but a camera that never moves is a worse failure than an awkward angle.
-    if (!found) _specWant.copy(_specFrom).addScaledVector(_specDir, SPEC_BACK);
-
-    // Damped so following a running teammate is smooth; a hard snap every time the
-    // target changes would be nauseating, which is why specSnap only covers cuts.
-    const k = specSnap ? 1 : Math.min(1, 1 - Math.exp(-dt * 16));
-    specSnap = false;
-    camera.position.lerp(_specWant, k);
-    camera.rotation.order = 'YXZ';
-    camera.rotation.y = yaw;
-    camera.rotation.x = pitch;
-    camera.rotation.z = 0;
-    // slightly wider than the player's own FOV: this is a shot of a person, not a
-    // look down a sight, and the extra frame keeps them in view when they turn
-    const fov = Math.min(94, Math.max(74, (player.baseFov || 78) + 8));
-    if (camera.fov !== fov) { camera.fov = fov; camera.updateProjectionMatrix(); }
-    hud.spectate(t.name, mates.length);
-}
-
-function endSpectate() {
-    specTarget = null;
-    specSnap = true;
-    specLive = false;
-    hud.spectate(null);
+    if (state === 'playing' && !player.paused) roam.update(dt, camera);
 }
 
 // A lightweight stand-in so bots can treat the player like any other entity.
@@ -1002,6 +976,7 @@ const playerProxy = {
 // ── loop ────────────────────────────────────────────────────────────────────
 function loop(ts) {
     requestAnimationFrame(loop);
+    if (glLost) return;            // the card on screen already says what happened
     const _info = renderer.info.render;
     frameStats.calls = _info.calls;
     frameStats.triangles = _info.triangles;
@@ -1056,7 +1031,7 @@ function loop(ts) {
     player.paused = frozen;
 
     if (player.alive) {
-        if (specTarget) endSpectate();
+        if (roam.active) exitFreeRoam();
         player.update(dt, nowSec);
         if (!frozen) player.tryFire(nowSec);
     } else if (!gamemode.canRespawn(player)) {
@@ -1064,7 +1039,7 @@ function loop(ts) {
         // round flips. Rather than stare at the sky, ride a surviving
         // teammate's eyes until then.
         player.update(dt, nowSec);
-        updateSpectator(dt);
+        updateFreeRoam(dt);
     } else {
         player.update(dt, nowSec);
         respawnTimer -= dt;
@@ -1072,7 +1047,7 @@ function loop(ts) {
         if (respawnTimer <= 0) {
             player.respawn(pickSafeSpawn());
             hud.hideDeath();
-            endSpectate();
+            exitFreeRoam();
             grabPointer();
         }
     }
