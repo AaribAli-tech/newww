@@ -34,7 +34,7 @@ import { createWorldWeapon, WEAPON_GRIPS } from './weapons.js';
 import { AnimatedSoldier, charactersReady } from './character.js';
 import { SoldierRig } from './soldier.js';
 import { TEAM_B } from './utils.js';
-import { STAND_FLIP, ARMS, TARGET_HEIGHT, fitFactor } from './rebel-pose.js';
+import { NO_FLIP, flipFromJoints, poseBones, restPoseOf, ARMS, TARGET_HEIGHT, fitFactor } from './rebel-pose.js';
 
 const BASE = 'assets/characters/';
 const RUN_SPEED = 5.6;             // m/s at which the stride reaches full amplitude
@@ -147,13 +147,25 @@ export async function loadRebel(base = BASE) {
         // different height. The matrices are primed by hand because a freshly loaded
         // FBX has never been rendered, so Box3.setFromObject() would otherwise read
         // the stale matrixWorld each node was built with.
-        for (const [name, v] of Object.entries(STAND_FLIP)) {
-            const b = bones[name]; if (!b) continue;
-            b.rotation.x = v;
-        }
+        S.rest = restPoseOf(bones);
         (function prime(o) { o.updateMatrix(); for (const c of o.children) prime(c); })(root);
         root.updateMatrixWorld(true);
-
+        const jointY = (k) => {
+            const b = bones[k];
+            return b ? b.getWorldPosition(new THREE.Vector3()).y : NaN;
+        };
+        // Joints, not the bounding box, make the call: this rig carries a skinned body
+        // mesh whose box is its BIND pose however the bones turn, so both candidate
+        // poses measured 299.1 units and the difference was noise. And the joints have
+        // to be read before anything is zeroed — the file stands the soldier up with
+        // its own rotations (a thigh rests at z -3.082, a toe on the floor at y 0.4),
+        // so clearing them invents a fold and the "fix" then folds a healthy rig.
+        S.standFlip = flipFromJoints(jointY);
+        if (Object.keys(S.standFlip).length) {
+            const folded = {};
+            for (const k of Object.keys(S.standFlip)) folded[k] = 0;
+            poseBones(bones, S.rest, folded, { k: 1, flip: S.standFlip, easeOthers: false });
+        }
         const box = new THREE.Box3().setFromObject(root);
         S.rawHeight = Math.max(0.001, box.max.y - box.min.y);
         root.scale.setScalar(TARGET_HEIGHT / S.rawHeight);
@@ -373,37 +385,47 @@ export class RebelSoldier {
         // do not match how fast it is actually moving
         if (this.speed > 0.3) this.phase += dt * this.speed * 1.95;
 
-        const t = this._targets;
-        for (const b of BONES) { const g = t[b]; g.x = g.y = g.z = 0; }
+        // One pooled object per bone, refilled in place every frame — no allocation
+        // per bot per frame. `flex` is a bend in the human direction, and POSE_JOINTS
+        // decides which axis that is, what sign, and the left/right mirroring; `x/y/z`
+        // are the raw turns that are not a bend at all (the torso and head swivelling
+        // to look somewhere). All of it is added on top of the rotation the file
+        // shipped with, which is why a walk cycle no longer overwrites standing.
+        const t = this._tgt || (this._tgt = Object.create(null));
+        for (const b of BONES) {
+            const g = t[b] || (t[b] = { flex: 0, x: 0, y: 0, z: 0 });
+            g.flex = 0; g.x = 0; g.y = 0; g.z = 0;
+        }
 
         const amp = Math.min(1, this.speed / RUN_SPEED);
         const swing = Math.sin(this.phase) * (0.30 + 0.72 * amp);
         const knee = (0.16 + 0.52 * amp) * (0.5 + 0.5 * Math.sin(this.phase));
         const armSwing = Math.sin(this.phase + Math.PI / 2) * (0.14 + 0.40 * amp);
 
-        t.LeftUpLeg.x = swing; t.RightUpLeg.x = -swing;
-        t.LeftLeg.x = -knee; t.RightLeg.x = -knee;
-        t.LeftFoot.x = knee * 0.4; t.RightFoot.x = knee * 0.4;
-        t.LeftToeBase.x = knee * 0.22; t.RightToeBase.x = knee * 0.22;
-        // +rotation.x swings a flipped limb forwards — measured on the rig, since
-        // the file's rest pose has the arms pointing the other way.
-        t.LeftArm.x = armSwing + ARMS.swing; t.RightArm.x = -armSwing + ARMS.swing;
-        t.LeftForeArm.x = ARMS.elbow + ARMS.elbowRun * amp;
-        t.RightForeArm.x = ARMS.elbow + ARMS.elbowRun * amp;
+        t.LeftUpLeg.flex = swing; t.RightUpLeg.flex = -swing;
+        // a positive knee is heel-back-and-up on this rig (measured: +0.6 rad lifts the
+        // ankle 10 units and puts it 33 behind the knee). The old code negated it, which
+        // bent every soldier's knee forwards — a locked, walking-forwards-legs-back gait.
+        t.LeftLeg.flex = knee; t.RightLeg.flex = knee;
+        t.LeftFoot.flex = knee * 0.4; t.RightFoot.flex = knee * 0.4;
+        t.LeftToeBase.flex = knee * 0.22; t.RightToeBase.flex = knee * 0.22;
+        t.LeftArm.flex = armSwing + ARMS.swing; t.RightArm.flex = -armSwing + ARMS.swing;
+        t.LeftForeArm.flex = ARMS.elbow + ARMS.elbowRun * amp;
+        t.RightForeArm.flex = ARMS.elbow + ARMS.elbowRun * amp;
 
         if (state.aiming) {
             // both hands forward, weapon on the line of aim: the right hand on the
             // grip, the left further out on the handguard
-            t.RightArm.x = ARMS.aim.rightArm; t.RightForeArm.x = ARMS.aim.rightForeArm;
-            t.LeftArm.x = ARMS.aim.leftArm; t.LeftForeArm.x = ARMS.aim.leftForeArm;
+            t.RightArm.flex = ARMS.aim.rightArm; t.RightForeArm.flex = ARMS.aim.rightForeArm;
+            t.LeftArm.flex = ARMS.aim.leftArm; t.LeftForeArm.flex = ARMS.aim.leftForeArm;
         }
         const c = this.crouch;
         if (c > 0.02) {
-            t.Spine.x = 0.20 * c; t.Spine1.x = 0.10 * c;
+            t.Spine.flex += 0.20 * c; t.Spine1.flex += 0.10 * c;      // a crouch leans FORWARD
             t.Hips.x = -0.16 * c;
-            t.LeftUpLeg.x += 0.55 * c; t.RightUpLeg.x += 0.55 * c;
-            t.LeftLeg.x -= 1.15 * c; t.RightLeg.x -= 1.15 * c;
-            t.LeftFoot.x += 0.55 * c; t.RightFoot.x += 0.55 * c;
+            t.LeftUpLeg.flex += 0.55 * c; t.RightUpLeg.flex += 0.55 * c;
+            t.LeftLeg.flex += 1.15 * c; t.RightLeg.flex += 1.15 * c;
+            t.LeftFoot.flex += 0.55 * c; t.RightFoot.flex += 0.55 * c;
         }
 
         // aim rides on top of the pose, split up the chain like the GLB rig does
@@ -411,20 +433,17 @@ export class RebelSoldier {
         const yaw = THREE.MathUtils.clamp(state.lookYaw || 0, -0.7, 0.7);
         this.aimPitch += (pitch - this.aimPitch) * Math.min(1, dt * 10);
         this.lookYaw += (yaw - this.lookYaw) * Math.min(1, dt * 10);
-        t.Spine.x += this.aimPitch * 0.35; t.Spine.y += this.lookYaw * 0.35;
-        t.Spine1.x += this.aimPitch * 0.40; t.Spine1.y += this.lookYaw * 0.30;
-        t.Neck.x += this.aimPitch * 0.20;
-        t.Head.x += this.aimPitch * 0.30; t.Head.y += this.lookYaw * 0.40;
+        // leaning back is the negative of the forward bend; the turn is not a bend
+        // at all, so it goes in raw
+        t.Spine.flex -= this.aimPitch * 0.35; t.Spine.y += this.lookYaw * 0.35;
+        t.Spine1.flex -= this.aimPitch * 0.40; t.Spine1.y += this.lookYaw * 0.30;
+        t.Neck.flex -= this.aimPitch * 0.20;
+        t.Head.flex -= this.aimPitch * 0.30; t.Head.y += this.lookYaw * 0.40;
 
-        const k = 1 - Math.exp(-dt * 14);
-        for (const name of BONES) {
-            const b = this.bones[name]; if (!b) continue;
-            const g = t[name];
-            // the standing flip is part of the pose's zero, not a one-off nudge
-            b.rotation.x += (g.x + (STAND_FLIP[name] || 0) - b.rotation.x) * k;
-            b.rotation.y += (g.y - b.rotation.y) * k;
-            b.rotation.z += (g.z - b.rotation.z) * k;
-        }
+        poseBones(this.bones, S.rest, t, {
+            k: 1 - Math.exp(-dt * 14),
+            flip: S.standFlip || NO_FLIP
+        });
         if (this.bones.Hips) {
             const bob = this.speed > 0.35
                 ? Math.abs(Math.sin(this.phase)) * 0.045 * (0.4 + amp)

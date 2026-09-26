@@ -301,6 +301,29 @@ const live = await page.evaluate(() => {
 log(`   live            ${live.bots} bots · state ${live.state} · ${live.health} hp · HUD ${live.hudVisible ? 'up' : 'missing'}`);
 log(`   perf readout    ${String(live.perfHud || '').replace(/\s+/g, ' ').trim()}`);
 
+// ── the imported FBX is standing in the scene the game draws ────────────────
+// The pose of this rig is not a detail you can eyeball once and forget: the game
+// once overwrote the file's own standing rotations with the animation angles and
+// every soldier walked around with their boots at head height and their hands
+// behind their head. Bounding boxes cannot catch that (the skinned body keeps its
+// bind-pose box whatever the bones do), so ask the bones the game is moving.
+const stance = await page.evaluate(() => {
+    const G = window.__nuketown;
+    const V = G.camera.position.constructor;
+    const rows = [];
+    for (const b of (G.bots || [])) {
+        if (b.alive === false) continue;                 // a ragdoll is meant to be upside down
+        const bones = b.rig && b.rig.bones;
+        if (!bones || !bones.Head || !bones.Hips || !bones.LeftFoot) continue;
+        const y = (k) => bones[k].getWorldPosition(new V()).y;
+        rows.push({ hip: y('Hips'), head: y('Head'), ankle: y('LeftFoot'), hand: y('LeftHand') });
+    }
+    return rows;
+});
+const upright = stance.filter(r => r.head > r.hip + 0.3 && r.ankle < r.hip - 0.2 && r.hand < r.head);
+const poseOk = stance.length === 0 || stance.length >= 2 && upright.length === stance.length;
+log(` ${poseOk ? '  standing pose ' : '   STANDING POSE'}  ${stance.length ? upright.length + '/' + stance.length + ' alive soldiers upright · head ' + stance.map(r => (r.head - r.hip).toFixed(2) + ' m above the hip').slice(0, 1).join('') : 'no rig with bones to measure'}`);
+
 await snap('game.png');
 
 // fire a few rounds and make sure nothing throws while shooting/reloading
@@ -661,7 +684,10 @@ const reloadOk = !reloadProblem && (!sw.registered || reloadWire < firstWire * 0
     && !!remembered && remembered.gate === false && remembered.difficulty === 'medium';
 const ok = errors.length === 0 && failed.length === 0 && missing.length === 0 &&
     report.scene.skinned > 0 && live.bots > 0 && report.assets.soldiers && report.assets.viewmodels &&
-    reloadOk && specOk && killsOk;
+    reloadOk && specOk && killsOk && poseOk
+    // and the difficulty is enforced by this run, not just reported: the gate asked,
+    // closed, and left the numbers ai.js reads on the soldiers that are already alive
+    && diffOk;
 // a real repeat-visit win: the shell cache must keep the second load off the wire
 if (sw.registered && firstWire > 0 && reloadWire > firstWire * 0.25) {
     log('   note: the repeat visit still pulled a sizeable share from the network');

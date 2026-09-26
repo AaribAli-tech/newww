@@ -14,7 +14,8 @@ import { GUN_GAME_LADDER, WEAPON_DEFS } from '../src/js/weapons.js';
 import { SPAWN_A, SPAWN_B } from '../src/js/map.js';
 import { TEAM_A, TEAM_B } from '../src/js/utils.js';
 import { readFile } from 'node:fs/promises';
-import { STAND_FLIP, ARMS, TARGET_HEIGHT, fitFactor } from '../src/js/rebel-pose.js';
+import { existsSync } from 'node:fs';
+import { STAND_FLIP, NO_FLIP, flipFromJoints, foldedLimb, POSE_JOINTS, restPoseOf, poseBones, ARMS, TARGET_HEIGHT, fitFactor } from '../src/js/rebel-pose.js';
 
 let pass = 0, fail = 0;
 const ok = (name, cond, detail = '') => {
@@ -351,12 +352,227 @@ group('rebel-pose.js — the FBX calibration both pages share');
     // and both consumers actually use it
     const rebel = await readFile(new URL('../src/js/rebel.js', import.meta.url), 'utf8');
     const tester = await readFile(new URL('../src/tester/tester.js', import.meta.url), 'utf8');
-    ok('the bot rig adds the flip under every animated bone',
-        /b\.rotation\.x \+= \(g\.x \+ \(STAND_FLIP\[name\] \|\| 0\)/.test(rebel));
+    // The flip used to be unconditional, which is how "the feet are where the head
+    // is and there are no hands" happened: the same half-turn that unfolds a rig
+    // that shipped folded ties a rig that ships standing into a knot. So both pages
+    // now ask the rig which of the two poses is taller and use that one.
+    ok('the bot rig keeps the rotations the file shipped with, and reads them first',
+        /S\.rest = restPoseOf\(bones\);/.test(rebel)
+        && rebel.indexOf('restPoseOf(bones)') < rebel.indexOf('flipFromJoints(jointY)'));
+    ok('the bot rig decides the pose from its joints, not from a constant',
+        /S\.standFlip = flipFromJoints\(jointY\)/.test(rebel));
+    ok('and animates it as a delta through the shared helper',
+        /poseBones\(this\.bones, S\.rest, t, \{/.test(rebel));
+    ok('and reuses one pooled target per bone instead of building maps per frame',
+        /this\._tgt \|\| \(this\._tgt = Object\.create\(null\)\)/.test(rebel)
+        && !/Object\.keys\(POSE_JOINTS\)\.map/.test(rebel));
+    ok('the flip the bot rig applies is the one it measured, with no constant behind it',
+        /flip: S\.standFlip \|\| NO_FLIP/.test(rebel) && !/STAND_FLIP\[name\]/.test(rebel));
+    ok('neither page writes a channel the helper does not read (no .bend, no .rx)',
+        !/\.bend\b/.test(rebel) && !/\.bend\b/.test(tester) && !/\.rx\b/.test(tester));
+    ok('and the shared helper has one shape to accept, so the two cannot drift',
+        /poseBones\(bones, rest, angles, \{ k = 1, flip = null, easeOthers = true \} = \{\}\)/.test(
+            await readFile(new URL('../src/js/rebel-pose.js', import.meta.url), 'utf8')));
+    ok('the test page decides it the same way and poses through the same helper',
+        /rig\.standFlip = flipFromJoints\(jointY\)/.test(tester)
+        && /poseBones\(b, s\.rest \|\| rig\.rest, t, \{/.test(tester)
+        && /rig\.rest = restPoseOf\(rig\.bones\)/.test(tester));
+    ok('the box is not what decides it any more, on either page',
+        !/chooseStandFlip/.test(rebel) && !/chooseStandFlip/.test(tester));
+    ok('the test page prints the evidence it judged on',
+        /standJoints = \{/.test(tester) && /ankle \$\{rig\.standJoints\.ankleL\}/.test(tester));
+    ok('neither page writes an angle by assignment any more',
+        !/bone\.rotation\.[xyz] \+= \(tg\./.test(tester) && !/b\.rotation\.x \+= \(g\.x/.test(rebel));
+    ok('and neither one clears the bones to measure them, which is how the fold was invented',
+        !/setTable\(/.test(rebel) && !/setTable\(/.test(tester));
+    ok('both pages agree on one joint table, imported rather than copied',
+        /POSE_JOINTS/.test(await readFile(new URL('../src/js/rebel-pose.js', import.meta.url), 'utf8'))
+        && /poseBones\(/.test(rebel) && /poseBones\(/.test(tester));
     ok('the bot rig sizes itself from what it drew, once, and shares the fit',
         /fitFactor\(h\)/.test(rebel) && /if \(!S\.calibrated\)/.test(rebel));
     ok('the test page dresses its range with clones of the model',
         /cloneRig\(rig\.group\)/.test(tester) && /userData\.part = isHead \? 'head' : 'body'/.test(tester));
+}
+
+// A canvas that is good enough for three's texture helpers to be constructed
+// against: nothing is drawn, this only stops the procedural-material code from
+// needing a browser to run in the rules tests.
+function mkEl(w = 64, h = 64) {
+    const ctx = new Proxy({ canvas: { width: w, height: h } }, {
+        get(t, k) {
+            if (k in t) return t[k];
+            if (k === 'getImageData') return (x, y, gw, gh) => ({ data: new Uint8ClampedArray(gw * gh * 4), width: gw, height: gh });
+            if (k === 'createImageData') return (gw, gh) => ({ data: new Uint8ClampedArray(gw * gh * 4), width: gw, height: gh });
+            return () => ({ addColorStop() {} });
+        },
+        set(t, k, v) { t[k] = v; return true; }
+    });
+    return { style: {}, setAttribute() {}, addEventListener() {}, getContext: () => ctx, width: w, height: h };
+}
+
+// ── 8b. which of the two poses is standing, decided by measuring ────────────
+group('rebel-pose.js — the standing pose is chosen, not assumed');
+{
+    // The FBX this game ships with has its limbs folded up: an ankle at 1.42 m with
+    // the hip at 0.13 m. Standing it needs a half-turn on the four limb roots. What
+    // the box says is useless here, so these cases are joints.
+    const folded = { Hips: 0.13, Spine2: 0.82, LeftFoot: 1.42, RightFoot: 1.42, LeftHand: 1.60, RightHand: 1.60 };
+    const standing = { Hips: 0.93, Spine2: 1.42, LeftFoot: 0.08, RightFoot: 0.08, LeftHand: 0.30, RightHand: 0.30 };
+    const t = (map) => flipFromJoints(k => map[k]);
+
+    ok('a rig with its feet above its hips and its hands above its chest is folded',
+        Object.keys(t(folded)).sort().join(',') === 'LeftArm,LeftUpLeg,RightArm,RightUpLeg',
+        Object.keys(t(folded)).sort().join(','));
+    ok('every folded limb gets exactly half a turn',
+        Object.values(t(folded)).every(v => Math.abs(v - Math.PI) < 1e-9));
+    ok('a rig that already stands gets no turn at all', t(standing) === NO_FLIP);
+    ok('a T-pose is level, not folded: the tolerance is a slice of the torso',
+        Object.keys(t({ ...standing, LeftHand: 1.44, RightHand: 1.40 })).length === 0);
+    ok('and only the limb that is actually folded is turned',
+        Object.keys(t({ ...standing, LeftFoot: 1.9 })).join(',') === 'LeftUpLeg');
+    ok('centimetres decide the same way as metres — no unit is assumed',
+        Object.keys(t(Object.fromEntries(Object.entries(folded).map(([k, v]) => [k, v * 100])))).length === 4);
+    ok('a rig whose joints cannot be read is left exactly as it shipped',
+        Object.keys(flipFromJoints(() => undefined)).length === 0);
+    ok('and a limb is judged by whatever joint of it CAN be read, wrist before elbow',
+        Object.keys(flipFromJoints((k) => (k === 'Hips' ? 150 : k === 'Spine2' ? 208
+            : k === 'LeftFoot' || k === 'RightFoot' ? 17
+            : k === 'LeftHand' ? NaN            // an export with no hand bones at all
+            : k === 'LeftForeArm' ? 300 : 200))).join(',') === 'LeftArm');
+    ok('the hip height alone is enough to judge the legs',
+        Object.keys(flipFromJoints((k) => (k === 'Hips' ? 150 : k === 'Spine2' ? 208
+            : k === 'LeftFoot' ? 300 : k === 'RightFoot' ? 300 : 200)))
+        .sort().join(',') === 'LeftUpLeg,RightUpLeg');
+    ok('folded means below-the-joint, with slack', foldedLimb(1, 1.2) === true
+        && foldedLimb(1, 0.2) === false && foldedLimb(1, 1.05, 0.2) === false);
+    ok('the flip both pages converge on is the same table the fold produces',
+        JSON.stringify(t(folded)) === JSON.stringify(STAND_FLIP));
+}
+
+// ── 8b2. the joint table, re-measured against the file it was fitted to ───────
+// POSE_JOINTS says which axis bends each joint and in which direction. Those were
+// measured once by hand, which is exactly how they went wrong the first time — so
+// the table is now checked against the FBX itself, in the loader the page uses.
+// If a re-export moves a joint's flexion onto another axis, this is what catches it.
+group('rebel-pose.js — the joint table is what the FBX actually does');
+{
+    globalThis.document = globalThis.document || {
+        createElementNS: mkEl, createElement: mkEl, body: { appendChild() {} }
+    };
+    globalThis.window = globalThis.window || { devicePixelRatio: 1, addEventListener() {} };
+    const THREE = await import('three');
+    const { FBXLoader } = await import('three/examples/jsm/loaders/FBXLoader.js');
+    const { readFileSync } = await import('node:fs');
+    const fbx = new URL('../src/assets/rebel/rebel.fbx', import.meta.url);
+    ok('the FBX this table was fitted to is in the repo', existsSync(fbx), 'src/assets/rebel/rebel.fbx');
+    const buf = readFileSync(fbx);
+    const root = new FBXLoader().parse(buf.buffer.slice(buf.byteOffset, buf.byteOffset + buf.byteLength), '');
+    const norm = n => (n || '').toLowerCase().replace(/^mixamorig[:_\s-]?/, '').replace(/\.[0-9]+$/, '').replace(/[:_\s-]/g, '');
+    // the table's own joints, plus the ones it compares against
+    const names = [...new Set(Object.values(POSE_JOINTS).reduce(
+        (acc, v) => acc.concat([v.then].filter(Boolean)), Object.keys(POSE_JOINTS)))];
+    const bones = {};
+    root.traverse(o => {
+        if (!o.isBone) return;
+        const k = norm(o.name);
+        for (const key of names) if (!bones[key] && k === key.toLowerCase()) bones[key] = o;
+    });
+    ok('every joint in the table exists in the file', names.every(k => !!bones[k]),
+        names.filter(k => !bones[k]).join(',') || 'all present');
+    const rest = restPoseOf(bones);
+    const at = k => bones[k].getWorldPosition(new THREE.Vector3());
+    const put = (over) => {
+        for (const k of names) { const b = bones[k]; if (b) b.rotation.set(rest[k].x, rest[k].y, rest[k].z); }
+        for (const [k, v] of Object.entries(over)) {
+            const spec = POSE_JOINTS[k];
+            if (bones[k] && spec) bones[k].rotation[spec.axis] += spec.sign * v;
+        }
+        (function prime(o) { o.updateMatrix(); for (const c of o.children) prime(c); })(root);
+        root.updateMatrixWorld(true);
+    };
+    put({});
+    ok('the file ships its soldier standing: the toe is on the floor, the head is on top',
+        at('LeftToeBase').y < 0.5 && at('Head').y > at('Spine2').y && at('LeftFoot').y < at('Hips').y,
+        `toe ${at('LeftToeBase').y.toFixed(1)} head ${at('Head').y.toFixed(1)} ankle ${at('LeftFoot').y.toFixed(1)} hip ${at('Hips').y.toFixed(1)}`);
+    ok('so no standing flip is wanted or needed for this rig',
+        Object.keys(flipFromJoints(k => (bones[k] ? at(k).y : NaN))).length === 0);
+    for (const [name, spec] of Object.entries(POSE_JOINTS)) {
+        if (!spec.want || !spec.then || !bones[name] || !bones[spec.then]) continue;
+        put({}); const a = at(spec.then);
+        put({ [name]: 0.6 }); const b = at(spec.then);
+        const dz = b.z - a.z, dy = b.y - a.y;
+        const good = spec.want === 'forward' ? dz < -8 : spec.want === 'back' ? dz > 8 : dy > 8;
+        ok(`a positive bend on ${name} moves ${spec.then} ${spec.want}`, good, `Δz ${dz.toFixed(1)}, Δy ${dy.toFixed(1)}`);
+    }
+    put({ LeftUpLeg: 0.5, RightUpLeg: -0.5 });
+    ok('the legs swing in opposite phases, as a walk needs',
+        (at('LeftLeg').z - at('RightLeg').z) < -20,
+        `L ${at('LeftLeg').z.toFixed(1)} R ${at('RightLeg').z.toFixed(1)}`);
+    put({}); const handRest = at('LeftHand').z;
+    put({ LeftArm: 0.9, RightArm: 0.9 });
+    ok('both arms come forward for the aim pose, mirrored by the table, not one side only',
+        Math.abs(at('LeftHand').z - at('RightHand').z) < 12 && at('LeftHand').z < handRest - 4,
+        `hand z ${at('LeftHand').z.toFixed(1)} / ${at('RightHand').z.toFixed(1)} from ${handRest.toFixed(1)}`);
+    ok('and nothing about the pose is a magic number the file was not checked against',
+        Object.values(POSE_JOINTS).every(v => ['x', 'y', 'z'].includes(v.axis) && Math.abs(v.sign) === 1));
+    put({});
+}
+
+// ── 8c. switching weapons: the frame you press the key must not build anything ─
+// A switch used to build the new gun's viewmodel on the press frame and then wait
+// 0.22 s in the air before showing it, which together felt like the game stopping.
+// The work now happens in a queue the loop drains on cheap frames (and warms on
+// the GPU), the swap is at 0.14 s, and a key pressed mid-swap retargets the swap
+// instead of being dropped.
+group('viewmodel.js — a switch costs the press frame nothing');
+{
+    const vm = await readFile(new URL('../src/js/viewmodel.js', import.meta.url), 'utf8');
+    const main = await readFile(new URL('../src/js/main.js', import.meta.url), 'utf8');
+    const press = vm.slice(vm.indexOf('requestSwitch(index) {'), vm.indexOf('startReload(def) {'));
+    ok('the press path builds nothing', !/_ensure\(|_build\(/.test(press), press.slice(0, 0) + 'no build call');
+    ok('it asks the queue instead', /this\._queue\.unshift\(index\)/.test(press));
+    ok('a key during a swap retargets it instead of being dropped',
+        /this\.pendingSwitch = index;/.test(press) && /switchT > SWAP_LOWER/.test(press));
+    // scoped to the switch block: 0.22 is also an ambient light intensity and a
+    // trigger angle elsewhere in the file, and this rule is about the timings
+    const swapBlock = vm.slice(vm.indexOf('── weapon switch'), vm.indexOf('const swPhase'));
+    ok('the dip is where the model changes, and it is shorter than it was',
+        /const half = SWAP_LOWER;/.test(swapBlock) && /const SWAP_LOWER = 0\.14;/.test(vm),
+        `SWAP_LOWER ${/SWAP_LOWER/.test(swapBlock) ? 'in the swap block' : 'missing'}`);
+    ok('the raise is timed off the same number, so the two cannot drift',
+        /switchT >= half \* 2/.test(swapBlock) && /\/ \(SWAP_LOWER \* 2\)/.test(vm));
+    ok('the loop drains the queue only on frames that have room',
+        /if \(frameAvg < 15\) vm\.prebuild\(renderer, 6\);/.test(main));
+    ok('a match queues every gun it could hand you', /vm\.queueAll\(\);/.test(main));
+
+    // the same rules, behaviourally, with no GPU in sight
+    globalThis.document = globalThis.document || {
+        createElementNS: mkEl, createElement: mkEl, body: { appendChild() {} }
+    };
+    globalThis.window = globalThis.window || { devicePixelRatio: 1, addEventListener() {} };
+    const { ViewModel } = await import('../src/js/viewmodel.js');
+    const fake = { renders: 0, targets: [], autoClear: 'was',
+        render() { this.renders++; },
+        getRenderTarget() { return null; },          // the world pass is at the screen
+        setRenderTarget(t) { this.targets.push(t === null ? 'null' : 'rt'); } };
+    const v = new ViewModel(0);
+    ok('every weapon but the one in hand starts out unbuilt',
+        v.models.filter(m => !m).length === v.models.length - 1, `${v.models.length - 1} queued`);
+    ok('the queue holds exactly the unbuilt ones', v.queueAll() === v.models.length - 1);
+    const before = v._queue.length;
+    v.prebuild(fake, 0);
+    ok('one call builds one weapon, then stops to let the frame finish',
+        before - v._queue.length === 1, `queue ${before} → ${v._queue.length}`);
+    ok('and drawing it once, off screen, is part of building it',
+        fake.renders === 1 && fake.targets.join(',') === 'rt,null',
+        `renders ${fake.renders}, targets ${fake.targets.join(',')}`);
+    ok('the warm draw leaves the renderer as it found it', fake.autoClear === 'was');
+    ok('a pressed switch waits its turn in the queue rather than being built now',
+        v.requestSwitch(v.current + 3) === true && !v.models[v.current + 3],
+        `pendingSwitch ${v.pendingSwitch}`);
+    ok('a second press during the dip wins the first one',
+        v.requestSwitch(v.current + 5) === true && v.pendingSwitch === v.current + 5);
+    ok('pressing the gun you already hold is refused', v.requestSwitch(v.current) === false);
 }
 
 // ── 9. panels a mode owns are applied at match start, not on a later frame ───

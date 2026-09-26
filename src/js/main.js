@@ -385,6 +385,9 @@ function setupLighting() {
 function setupPlayerRig() {
     vm = new ViewModel(TEAM_A);
     vm.setEnvironment(scene.environment);
+    // Every other gun gets built and drawn once, spread over the frames that have
+    // room for it, so that switching to a weapon never costs the player a stall.
+    vm.queueAll();
     hud = new HUD();
     // A placeholder so anything constructed below has a mode to read; the real
     // one is built per match in startMatch() from the chosen playlist.
@@ -1096,6 +1099,12 @@ function loop(ts) {
     // the viewmodel is not drawn once the death camera takes over
     composerFX.vmPass.enabled = player.alive;
     adaptResolution(dt);
+    // Building a viewmodel and letting the GPU compile and upload it is 10-20 ms
+    // of work that used to land on the frame you pressed a number key, which is the
+    // "the game stopped for a second and then the gun changed" that a switch felt
+    // like. It happens here instead, one weapon per call, and only when the frames
+    // are already fast enough to absorb it.
+    if (frameAvg < 15) vm.prebuild(renderer, 6);
 
     // Shadows only need refreshing every other frame; at 60 fps the lag is
     // invisible and it halves the cost of the most expensive pass.

@@ -21,7 +21,7 @@
 // Build it with:  node scripts/build-tester.mjs      →  public/tester/
 // ============================================================================
 import * as THREE from 'three';
-import { STAND_FLIP as REST_FLIP, ARMS, TARGET_HEIGHT, fitFactor } from '../js/rebel-pose.js';
+import { NO_FLIP, flipFromJoints, poseBones, restPoseOf, ARMS, TARGET_HEIGHT, fitFactor } from '../js/rebel-pose.js';
 import { FBXLoader } from 'three/examples/jsm/loaders/FBXLoader.js';
 // three 0.164 exports the clone helper directly (no SkeletonUtils namespace).
 import { clone as cloneRig } from 'three/examples/jsm/utils/SkeletonUtils.js';
@@ -245,7 +245,7 @@ const normBone = n => (n || '').toLowerCase()
     .replace(/^mixamorig[:_\s-]?/, '').replace(/\.[0-9]+$/, '').replace(/[:_\s-]/g, '');
 // Every rig needs its own angle targets, or the dummies would inherit the
 // player's pose through a shared table.
-const newTargets = () => { const o = {}; for (const k of BONE_KEYS) o[k] = { rx: 0, rz: 0, ry: 0 }; return o; };
+const newTargets = () => { const o = {}; for (const k of BONE_KEYS) o[k] = { flex: 0, x: 0, y: 0, z: 0 }; return o; };
 const boneTargets = newTargets();   // the player's, lerped toward every frame
 
 /**
@@ -265,6 +265,10 @@ function pickBones(root, out = {}) {
     return out;
 }
 
+// Not for the page: scripts and a console need a way in, because every number
+// above is computed from the scene graph and none of it is checkable from text.
+window.__tester = rig;
+
 new FBXLoader().load(ASSET.model, (root) => {
     rig.group = root;
     modelRoot.add(root);              // the group below follows the player's yaw
@@ -283,13 +287,39 @@ new FBXLoader().load(ASSET.model, (root) => {
         if (o.isMesh) rig.tris += (o.geometry.index ? o.geometry.index.count : o.geometry.attributes.position.count) / 3;
     });
 
-    // Stand the rig up BEFORE measuring it (see REST_FLIP): the bound pose is a
-    // folded ragdoll, so a height taken there would be the wrong height, and the
-    // floor offset would put the boots in the air. The matrices are then primed by
-    // hand: Box3.setFromObject() trusts whatever matrixWorld the nodes last had,
-    // and a freshly loaded FBX has never been rendered, so a plain
-    // updateMatrixWorld() is not enough to see the new pose.
-    for (const [k, v] of Object.entries(REST_FLIP)) if (rig.bones[k]) rig.bones[k].rotation.x = v;
+    // Stand the rig up BEFORE measuring it: a height taken in a folded pose would
+    // be the wrong height, and the floor offset would put the boots in the air.
+    // WHICH pose is standing is decided here by measuring both candidates rather
+    // than by assuming the file shipped folded (see rebel-pose.js) — the half-turn
+    // on a rig that already stands is what puts the feet where the head goes.
+    // The matrices are primed by hand: Box3.setFromObject() trusts whatever
+    // matrixWorld the nodes last had, and a freshly loaded FBX has never been
+    // rendered, so a plain updateMatrixWorld() is not enough to see the new pose.
+    // Read the rig exactly as the file delivered it, and keep those rotations: every
+    // angle the pose adds is a delta on top of them (see rebel-pose.js). Zeroing the
+    // bones to measure them is what made this page look wrong before — the standing
+    // pose lives IN those rotations (a shoulder rests at x 1.564, a thigh at z -3.082
+    // with the toe on the floor at y 0.4), so a rig cleared to zero is a rig folded,
+    // and the "correction" folded it further.
+    rig.rest = restPoseOf(rig.bones);
+    (function prime(o) { o.updateMatrix(); for (const c of o.children) prime(c); })(root);
+    root.updateMatrixWorld(true);
+    const jointY = (k) => {
+        const b = rig.bones[k];
+        return b ? b.getWorldPosition(new THREE.Vector3()).y : NaN;
+    };
+    rig.standJoints = {
+        hip: +jointY('Hips').toFixed(2), ankleL: +jointY('LeftFoot').toFixed(2),
+        chest: +jointY('Spine2').toFixed(2), handL: +jointY('LeftHand').toFixed(2)
+    };
+    // Joints, not the bounding box, make the call: the skinned body mesh keeps its
+    // BIND-pose box however the bones turn, so both candidates measured 299.1 units.
+    rig.standFlip = flipFromJoints(jointY);
+    if (Object.keys(rig.standFlip).length) {
+        const folded = {};
+        for (const k of Object.keys(rig.standFlip)) folded[k] = 0;
+        poseBones(rig.bones, rig.rest, folded, { k: 1, flip: rig.standFlip, easeOthers: false });
+    }
     rig.stoodUp = true;
     (function prime(o) { o.updateMatrix(); for (const c of o.children) prime(c); })(root);
     root.updateMatrixWorld(true);
@@ -415,51 +445,50 @@ function poseSkeleton(b, s) {
     const knee = (0.18 + 0.55 * amp) * (0.5 + 0.5 * Math.sin(ph));
     const arm = (0.16 + 0.45 * amp) * Math.sin(ph + Math.PI / 2);
 
-    for (const k of BONE_KEYS) t[k].rx = t[k].rz = t[k].ry = 0;
-    t.LeftUpLeg.rx = lunge; t.RightUpLeg.rx = -lunge;
-    t.LeftLeg.rx = -knee; t.RightLeg.rx = -knee;
-    t.LeftFoot.rx = knee * 0.4; t.RightFoot.rx = knee * 0.4;
-    t.LeftToeBase.rx = knee * 0.25; t.RightToeBase.rx = knee * 0.25;
-    // +rotation.x swings a flipped limb forwards (measured on the rig, not guessed),
-    // so the elbows bend forward here and the aim block below is positive too.
-    t.LeftArm.rx = arm + ARMS.swing; t.RightArm.rx = -arm + ARMS.swing;
-    t.LeftForeArm.rx = ARMS.elbow + ARMS.elbowRun * amp;
-    t.RightForeArm.rx = ARMS.elbow + ARMS.elbowRun * amp;
+    // `flex` is "bend this joint by this much", and POSE_JOINTS decides the axis, the
+    // direction, and the left/right mirroring for the rig that is actually loaded — on
+    // this file an arm bends about its local Z while a leg bends about its X, which is
+    // why one number per joint beats one axis per joint. `x/y/z` are the turns that
+    // are not flexion at all (the hips tilting in a crouch).
+    for (const key of BONE_KEYS) { const g = t[key]; g.flex = 0; g.x = 0; g.y = 0; g.z = 0; }
+    t.LeftUpLeg.flex = lunge; t.RightUpLeg.flex = -lunge;
+    t.LeftLeg.flex = knee; t.RightLeg.flex = knee;              // heel back and up
+    t.LeftFoot.flex = knee * 0.4; t.RightFoot.flex = knee * 0.4;
+    t.LeftToeBase.flex = knee * 0.25; t.RightToeBase.flex = knee * 0.25;
+    t.LeftArm.flex = arm + ARMS.swing; t.RightArm.flex = -arm + ARMS.swing;
+    t.LeftForeArm.flex = ARMS.elbow + ARMS.elbowRun * amp;
+    t.RightForeArm.flex = ARMS.elbow + ARMS.elbowRun * amp;
 
     // aim: hands come up and forward onto the grip and handguard, torso takes the yaw lead
     if (s.aim) {
-        t.RightArm.rx = ARMS.aim.rightArm; t.RightForeArm.rx = ARMS.aim.rightForeArm;
-        t.LeftArm.rx = ARMS.aim.leftArm; t.LeftForeArm.rx = ARMS.aim.leftForeArm;
-        t.LeftShoulder.ry = 0.12; t.RightShoulder.ry = -0.12;
+        t.RightArm.flex = ARMS.aim.rightArm; t.RightForeArm.flex = ARMS.aim.rightForeArm;
+        t.LeftArm.flex = ARMS.aim.leftArm; t.LeftForeArm.flex = ARMS.aim.leftForeArm;
+        t.LeftShoulder.flex = 0.12; t.RightShoulder.flex = 0.12;    // mirrored by the table
     }
 
     const c = s.crouch || 0;
     if (c > 0.02) {
-        t.Spine.rx = 0.20 * c; t.Spine1.rx = 0.10 * c;
-        t.Hips.rx = -0.16 * c;
-        t.LeftUpLeg.rx += 0.55 * c; t.RightUpLeg.rx += 0.55 * c;
-        t.LeftLeg.rx -= 1.15 * c; t.RightLeg.rx -= 1.15 * c;
-        t.LeftFoot.rx += 0.55 * c; t.RightFoot.rx += 0.55 * c;
+        t.Spine.flex = 0.20 * c; t.Spine1.flex = 0.10 * c;          // a crouch leans FORWARD
+        t.Hips.x = -0.16 * c;
+        t.LeftUpLeg.flex += 0.55 * c; t.RightUpLeg.flex += 0.55 * c;
+        t.LeftLeg.flex += 1.15 * c; t.RightLeg.flex += 1.15 * c;
+        t.LeftFoot.flex += 0.55 * c; t.RightFoot.flex += 0.55 * c;
     }
     if (!s.onGround) {   // tuck a little in the air
-        t.LeftUpLeg.rx += 0.32; t.RightUpLeg.rx += 0.22;
-        t.LeftLeg.rx -= 0.5; t.RightLeg.rx -= 0.35;
+        t.LeftUpLeg.flex += 0.32; t.RightUpLeg.flex += 0.22;
+        t.LeftLeg.flex += 0.5; t.RightLeg.flex += 0.35;
     }
     // recoil rides the spine so the gun "kicks" without needing an animation
     const r = s.recoil || 0;
-    t.Spine.rx -= 0.30 * r; t.Spine1.rx -= 0.16 * r; t.Neck.rx -= 0.10 * r;
-    t.RightForeArm.rx += ARMS.recoil.rightForeArm * r;             // elbows absorb the kick
-    t.LeftForeArm.rx += ARMS.recoil.leftForeArm * r;
-    if (s.hitFlinch > 0) t.Spine2.rx = 0.35 * s.hitFlinch;
+    t.Spine.flex += 0.30 * r; t.Spine1.flex += 0.16 * r; t.Neck.flex += 0.10 * r;
+    t.RightForeArm.flex += ARMS.recoil.rightForeArm * r;             // elbows absorb the kick
+    t.LeftForeArm.flex += ARMS.recoil.leftForeArm * r;
+    if (s.hitFlinch > 0) t.Spine2.flex = -0.35 * s.hitFlinch;       // a hit jerks you backwards
 
-    const k = s.snap ? 1 : 1 - Math.exp(-(s.dt || 0.016) * 14);
-    for (const key of BONE_KEYS) {
-        const bone = b[key]; if (!bone) continue;
-        const tg = t[key], flip = REST_FLIP[key] || 0;
-        bone.rotation.x += (tg.rx + flip - bone.rotation.x) * k;
-        bone.rotation.y += (tg.ry - bone.rotation.y) * k;
-        bone.rotation.z += (tg.rz - bone.rotation.z) * k;
-    }
+    poseBones(b, s.rest || rig.rest, t, {
+        k: s.snap ? 1 : 1 - Math.exp(-(s.dt || 0.016) * 14),
+        flip: s.flip || rig.standFlip || NO_FLIP
+    });
     // hips ride the step so the whole body has weight
     const bob = (moving ? Math.abs(Math.sin(ph)) * 0.045 * (0.4 + amp) : Math.sin((s.clock ?? performance.now()) * 0.0011) * 0.008)
         - c * 0.30;
@@ -897,6 +926,8 @@ function hudTick(dt) {
     el.state.textContent =
         `pose ${P.crouch > 0.4 ? 'CROUCH' : !P.onGround ? 'AIR' : speed > 0.35 ? (keys['shift'] ? 'SPRINT' : 'WALK') : 'IDLE'}` +
         ` · ${speed.toFixed(2)} m/s · ground ${P.onGround ? 'y' : 'n'} · hip ${P.height.toFixed(2)} m` +
+        ` · stand ${rig.standFlip && Object.keys(rig.standFlip).length ? 'flipped' : 'as shipped'}` +
+        (rig.standJoints ? ` (ankle ${rig.standJoints.ankleL} vs hip ${rig.standJoints.hip}, hand ${rig.standJoints.handL} vs chest ${rig.standJoints.chest})` : '') +
         ` · anim ${rig.animMode}${rig.clips.length ? '' : ' (no clips in file)'} · model ${st}` +
         ` · range ${dummies === 'model' ? 'MODEL' : 'boxes'}${hud.dummies ? ' (' + hud.dummies + ')' : ''}`;
     el.note.textContent = hud.error ? '⚠ ' + hud.note : hud.note;

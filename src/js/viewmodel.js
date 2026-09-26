@@ -11,6 +11,12 @@ import { mergeRig } from './optimize.js';
 import { applyPhotoreal } from './vmassets.js';
 
 const clamp = (v, a, b) => Math.max(a, Math.min(b, v));
+// How long the gun spends out of view during a swap, in seconds. The model is
+// exchanged at the bottom of the dip. It used to be 0.22 s down and 0.22 s up,
+// which on top of the build cost of the new model read as "the game stops, then
+// the gun changes" — the dip is now short enough that the swap itself is what you
+// see, and the model is already built and already drawn once (see prebuild()).
+const SWAP_LOWER = 0.14;
 const damp = (cur, tgt, lambda, dt) => cur + (tgt - cur) * (1 - Math.exp(-lambda * dt));
 
 /**
@@ -59,6 +65,11 @@ export class ViewModel {
 
         this.holder = new THREE.Group();
         this.scene.add(this.holder);
+        // Indices waiting to be built, drained a little per frame from the main
+        // loop. Empty until queueAll() is called (the constructor's own weapon is
+        // built directly, because it has to exist before the first frame).
+        this._queue = [];
+        this._warmRT = null;
 
         // Viewmodels are built on first use. Eagerly constructing all fifteen
         // cost 2.7 s of startup, and in Gun Game you only ever hold one at a
@@ -95,15 +106,92 @@ export class ViewModel {
     /** Build a viewmodel the first time it is asked for. */
     _ensure(i) {
         let vm = this.models[i];
-        if (!vm) {
-            vm = createViewModel(i, this.team);
-            const swapped = USE_PHOTOREAL_WEAPONS && applyPhotoreal(vm);
-            if (!swapped) mergeRig(vm.group);
-            vm.group.visible = false;
-            this.holder.add(vm.group);
-            this.models[i] = vm;
-        }
+        if (!vm) vm = this._build(i);
         return vm;
+    }
+
+    _build(i) {
+        const vm = createViewModel(i, this.team);
+        const swapped = USE_PHOTOREAL_WEAPONS && applyPhotoreal(vm);
+        if (!swapped) mergeRig(vm.group);
+        vm.group.visible = false;
+        this.holder.add(vm.group);
+        this.models[i] = vm;
+        const q = this._queue.indexOf(i);
+        if (q >= 0) this._queue.splice(q, 1);      // built — nothing left to warm
+        return vm;
+    }
+
+    /**
+     * Put every weapon that has not been built yet in the queue, most likely to be
+     * held first. Called when a match starts.
+     */
+    queueAll() {
+        this._queue = [];
+        for (let i = 0; i < this.models.length; i++) if (!this.models[i]) this._queue.push(i);
+        // The current gun and the one a forward scroll would land on come first:
+        // those are the two that get pressed within a second of spawning.
+        const cur = this.current;
+        this._queue.sort((a, b) => (a === cur ? -1 : b === cur ? 1 : 0)
+            || (a === (cur + 1) % this.models.length ? -1 : b === (cur + 1) % this.models.length ? 1 : 0)
+            || a - b);
+        return this._queue.length;
+    }
+
+    /**
+     * Build (and, with a renderer, draw once) whatever is queued, for as long as the
+     * frame can spare.
+     *
+     * Building a viewmodel is 3-17 ms of geometry and merging; drawing it for the
+     * first time is more again, because that is where the shader program is
+     * compiled and its buffers and textures are uploaded. Doing either of those on
+     * the frame a key was pressed is exactly the stall this file exists to avoid:
+     * the gun does not appear until the work is finished, so the whole thing reads
+     * as the game pausing. So it happens here instead, one weapon per call, in
+     * frames that were already cheap, and by the time a switch is requested the
+     * model is made and already warm.
+     *
+     * `ms` is a wall-clock budget, not a frame fraction: the loop only calls this
+     * when it knows the frame has room.
+     */
+    prebuild(renderer, ms = 6) {
+        if (!this._queue.length) return 0;
+        const t0 = performance.now();
+        let built = 0;
+        while (this._queue.length) {
+            const i = this._queue[0];
+            if (built && performance.now() - t0 > ms) break;
+            this._queue.shift();
+            if (this.models[i]) continue;
+            this._build(i);
+            built++;
+        }
+        if (built && renderer) this._warm(renderer);
+        return built;
+    }
+
+    /** Show every built weapon once, to a 4x4 target, so their first real draw is
+     *  not the frame that pays for compiling and uploading them. */
+    _warm(renderer) {
+        if (!renderer || typeof renderer.render !== 'function') return;
+        if (!this._warmRT) this._warmRT = new THREE.WebGLRenderTarget(4, 4, { depthBuffer: true });
+        const shown = [];
+        for (let i = 0; i < this.models.length; i++) {
+            const m = this.models[i];
+            if (m && !m.group.visible) { m.group.visible = true; shown.push(m); }
+        }
+        const target = renderer.getRenderTarget(), autoClear = renderer.autoClear;
+        try {
+            renderer.setRenderTarget(this._warmRT);
+            renderer.autoClear = true;
+            renderer.render(this.scene, this.camera);
+        } catch (e) {
+            // A lost or half-built context is not worth dying over: the real pass
+            // draws the same scene a frame later and will show any genuine problem.
+        }
+        renderer.setRenderTarget(target);
+        renderer.autoClear = autoClear;
+        for (const m of shown) m.group.visible = false;
     }
 
     get parts() { return this._ensure(this.current).parts; }
@@ -113,9 +201,21 @@ export class ViewModel {
 
     // ── events ──────────────────────────────────────────────────────────────
     requestSwitch(index) {
-        if (index === this.current || this.switchT > 0) return false;
-        // build it now, during the lower animation, so the raise does not stall
-        this._ensure(index);
+        if (index < 0 || index >= this.models.length) return false;
+        if (index === this.current) return false;
+        // Already swapping: retarget the dip instead of swallowing the key. The
+        // old code returned false here, so a number pressed during a swap did
+        // nothing at all while the ammo and the HUD had already moved on.
+        if (this.switchT > 0) {
+            if (this.pendingSwitch === index) return false;
+            this.pendingSwitch = index;
+            if (this.switchT > SWAP_LOWER) this.switchT = SWAP_LOWER * 0.4;   // dip again
+            return true;
+        }
+        // Do NOT build here: on the press frame that is the stall players feel.
+        // Ask for it and let the queue deliver it; if the queue has not got to it
+        // by the bottom of the dip, the swap there builds it as it always could.
+        if (!this.models[index] && this._queue.indexOf(index) < 0) this._queue.unshift(index);
         this.pendingSwitch = index;
         this.switchT = 0.001;
         return true;
@@ -189,7 +289,7 @@ export class ViewModel {
         // ── weapon switch: lower, swap, raise ──
         if (this.switchT > 0) {
             this.switchT += dt;
-            const half = 0.22;
+            const half = SWAP_LOWER;
             if (this.pendingSwitch >= 0 && this.switchT >= half) {
                 this._ensure(this.current).group.visible = false;
                 this.current = this.pendingSwitch;
@@ -204,7 +304,7 @@ export class ViewModel {
             }
             if (this.switchT >= half * 2) { this.switchT = 0; }
         }
-        const swPhase = this.switchT > 0 ? Math.sin(clamp(this.switchT / 0.44, 0, 1) * Math.PI) : 0;
+        const swPhase = this.switchT > 0 ? Math.sin(clamp(this.switchT / (SWAP_LOWER * 2), 0, 1) * Math.PI) : 0;
 
         // resolved here so it always refers to the weapon actually in hand
         const p = this.parts;
