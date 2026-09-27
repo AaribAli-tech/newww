@@ -760,7 +760,13 @@ group('modes.js — Gun Game, described honestly');
 group('utils.js — the perimeter is a clamp, not a mesh');
 {
     const U = await import('../src/js/utils.js');
-    ok('the rectangle is the one the map uses', U.MAP_RECT.maxX === 42 && U.MAP_RECT.minZ === -40);
+    ok('the rectangle is the authored footprint, multiplied as one piece',
+        Math.abs(U.MAP_RECT.maxX - 42 * U.MAP_SCALE) < 1e-9
+        && Math.abs(U.MAP_RECT.minZ + 40 * U.MAP_SCALE) < 1e-9
+        && Math.abs(U.MAP_RECT.minX + 42 * U.MAP_SCALE) < 1e-9
+        && Math.abs(U.MAP_RECT.maxZ - 38 * U.MAP_SCALE) < 1e-9);
+    ok('and the map is 45% more ground than the 84 × 78 it was authored at',
+        Math.abs(U.MAP_SCALE - 1.45) < 1e-9, `${U.MAP_RECT.maxX - U.MAP_RECT.minX} × ${U.MAP_RECT.maxZ - U.MAP_RECT.minZ} m`);
     const p = { x: 61.3, y: 0, z: -900 };
     ok('a runaway position is pulled back inside', U.clampToMap(p, 2.0) === true
         && p.x === U.MAP_RECT.maxX - 2 && p.z === U.MAP_RECT.minZ + 2, JSON.stringify(p));
@@ -920,6 +926,94 @@ group('gun game — one gun at a time until 75');
         && (au.match(/\n    release\(/g) || []).length === 3);
     ok('the send gain is handed back so it can be disconnected too',
         /return s;/.test(au.split('function out(')[1].split('\n\n')[0]));
+}
+
+
+// ── 21. a bigger map, decided in one place ──────────────────────────────────
+group('map scale — geometry, collision, tables and textures move together');
+{
+    const U = await import('../src/js/utils.js');
+    const map = await readFile(new URL('../src/js/map.js', import.meta.url), 'utf8');
+    const phy = await readFile(new URL('../src/js/physics.js', import.meta.url), 'utf8');
+    const mj = await readFile(new URL('../src/js/main.js', import.meta.url), 'utf8');
+    const ks = await readFile(new URL('../src/js/killstreaks.js', import.meta.url), 'utf8');
+    const hud = await readFile(new URL('../src/js/hud.js', import.meta.url), 'utf8');
+
+    ok('one constant decides the size of the world',
+        /export const MAP_SCALE = 1\.45;/.test(await readFile(new URL('../src/js/utils.js', import.meta.url), 'utf8')));
+    ok('the build applies it once, at the end, before anything is validated',
+        map.indexOf('applyWorldScale(scene, cw, MAP_SCALE, sky.mesh)') < map.indexOf('validateWaypoints(cw);'),
+        'order matters — nodes are checked against the scaled colliders');
+    ok('objects move out AND grow, so proportions survive',
+        /o\.position\.multiplyScalar\(k\)/.test(map) && /o\.scale\.multiplyScalar\(k\)/.test(map));
+    ok('the sky dome is left where it is',
+        /applyWorldScale\(scene, cw, MAP_SCALE, sky\.mesh\)/.test(map) && /if \(o === skip \|\| !\(o\.isMesh/.test(map));
+    ok('collision boxes follow the meshes, not a second copy of the layout',
+        /cw\.rescale\(k\)/.test(map) && /rescale\(k\) \{/.test(phy));
+    ok('and the broadphase grid is rebuilt rather than trusted',
+        /this\.grid\.clear\(\);/.test(phy) && /for \(let i = 0; i < this\.boxes\.length; i\+\+\) this\._span\(this\.boxes\[i\], i\)/.test(phy));
+    ok('a stale grid would hide walls, so the insert path is shared, not duplicated',
+        /_span\(b, idx\) \{/.test(phy) && /this\._span\(b, idx\);/.test(phy));
+    ok('steps grow with the map, or upstairs becomes unreachable',
+        /this\.stepHeight \*= k;/.test(phy));
+    ok('tiled textures get denser so a wall is not 45% wider siding',
+        /t\.repeat\.x \/= k/.test(map) && /t\.repeat\.y \/= k/.test(map));
+    ok('but only the tiling ones — a clamped decal is sized to its surface',
+        /if \(t\.wrapS === REP\) t\.repeat\.x \/= k/.test(map) && /SLOTS = \['map', 'normalMap'/.test(map));
+    ok('each texture is divided once, however many meshes share it',
+        /seen\.has\(t\.uuid\)/.test(map) && /seen\.add\(t\.uuid\)/.test(map));
+    ok('the minimap is authored in metres too, so it moves with the map',
+        /scaleMinimap\(k\)/.test(map) && /for \(const f of MINIMAP\.fences\) for \(let i = 0/.test(map));
+    ok('and its bounds are not scaled twice — they come from MAP_BOUNDS',
+        !/flat\(MINIMAP\.bounds\)/.test(map) && /bounds: \{ x0: MAP_BOUNDS\.minX/.test(map));
+    ok('the HUD draws in world units under that transform, so it needs no change',
+        /c\.strokeRect\(MAP_BOUNDS\.minX, MAP_BOUNDS\.minZ,/.test(hud));
+    ok('spawn points, nav nodes and perches are scaled at their definition',
+        /export const SPAWN_A = atScale\(/.test(map) && /export const SPAWN_B = atScale\(/.test(map)
+        && /export const WAYPOINTS = atScale\(\[/.test(map) && /export const PERCHES = atScale\(\[/.test(map));
+    ok('a perch has a floor to stand on, so its height scales as well',
+        /if \(Number\.isFinite\(n\.y\)\) o\.y = n\.y \* MAP_SCALE/.test(map));
+    ok('the perimeter is placed in authored metres, so it scales exactly once',
+        /const B = MAP_RECT_AUTHORED;/.test(map) && !/chainLinkRun\(MAP_BOUNDS|chainLinkRun\(B\.minX, B\.minZ, B\.maxX, B\.minZ\)/.test(map));
+    ok("a round's clock grew with the ground, so the point is still reachable",
+        (() => {
+            const ctl = createMode('ctl', { player: null, getBots: () => [], hud: { banner() { } }, effects: {}, scene: {}, audio: {} });
+            return Math.abs(ctl.roundT - 90 * U.MAP_SCALE) < 0.01 && ctl.roundT > 130;
+        })(), 'Round Control opens at 2:10, not 1:30');
+    ok('the freeze at the head of a round did NOT grow — nobody is walking during it',
+        /const FREEZE_TIME = 5\.0;/.test(await readFile(new URL('../src/js/modes.js', import.meta.url), 'utf8')));
+    ok('the authored rectangle is the only source of the scaled one',
+        /minX: MAP_RECT_AUTHORED\.minX \* MAP_SCALE/.test(await readFile(new URL('../src/js/utils.js', import.meta.url), 'utf8')));
+    ok('the world floor is authored too, and still covers the whole map',
+        /cw\.addAABB\(-140, -1\.0, -140, 140/.test(map));
+    ok('the fog reaches across the wider ground',
+        /new THREE\.Fog\(0xcfc4ac, 110 \* MAP_SCALE, 360 \* MAP_SCALE\)/.test(mj));
+    ok('the UAV orbit grows with the block it is watching',
+        /Math\.cos\(ang\) \* 62 \* MAP_SCALE/.test(ks) && /Math\.sin\(ang\) \* 48 \* MAP_SCALE/.test(ks));
+    ok('the camera still sees past the far house',
+        /new THREE\.PerspectiveCamera\(78,[^)]*,\s*(\d+)\)/.test(mj)
+        && Number(RegExp.$1) > 360 * U.MAP_SCALE, 'far plane vs fog');
+    ok('the primitive helpers do no scaling of their own, so none can forget it',
+        !/MAP_SCALE/.test(map.split('function box(')[1].split('\n}')[0])
+        && !/MAP_SCALE/.test(map.split('function cylinder(')[1].split('\n}')[0])
+        && !/MAP_SCALE/.test(map.split('function pave(')[1].split('\n}')[0]));
+    ok('every builder function stays authored in the original metres',
+        (map.match(/\* MAP_SCALE/g) || []).length === 3 && !/MAP_SCALE = /.test(map),
+        (map.match(/\* MAP_SCALE/g) || []).length + ' multiplications, all of them inside atScale');
+
+    // The clamp has to follow the rectangle it is given, at any size.
+    const at = (k, m = 2.0) => {
+        const p = { x: 42 * k + 1.9, z: 0 };
+        U.clampToMap(p, m, { minX: -42 * k, maxX: 42 * k, minZ: -40 * k, maxZ: 38 * k });
+        return p.x;
+    };
+    ok('the perimeter clamp bites at whatever edge it is given',
+        Math.abs(at(1.45) - (42 * 1.45 - 2)) < 1e-9 && Math.abs(at(1) - 40) < 1e-9,
+        `clamped to ${at(1.45).toFixed(2)} m at 1.45x, ${at(1).toFixed(2)} m at 1x`);
+    ok('and MAP_RECT is that same rectangle, not a copy that can drift',
+        Math.abs(U.MAP_RECT.maxX / 42 - U.MAP_SCALE) < 1e-12);
+    ok('so a soldier spawned at the far fence is still inside it',
+        (() => { const p = { x: U.MAP_RECT.maxX - 0.2, z: 0 }; U.clampToMap(p, 2.4); return p.x <= U.MAP_RECT.maxX - 2.4 + 1e-9; })());
 }
 
 console.log(`\n${fail === 0 ? '✓' : '✗'} ${pass} passed, ${fail} failed\n`);

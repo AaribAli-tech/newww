@@ -17,7 +17,7 @@
 import { TeamDeathmatch, countAlive } from './gamemode.js';
 import * as W from './weapons.js';
 import { SPAWN_A, SPAWN_B } from './map.js';
-import { TEAM_A, TEAM_B } from './utils.js';
+import { TEAM_A, TEAM_B, MAP_SCALE } from './utils.js';
 
 export const MODES = [
     { id: 'tdm', name: 'Team Deathmatch', desc: '5v5 · first to 75 kills · respawns on.' },
@@ -52,7 +52,14 @@ const FALLBACK_B = [{ x: 37, z: 0 }];
 const EMPTY = [];
 
 const FREEZE_TIME = 5.0;       // spec 2.2 — frozen setup at the head of a round
-const ROUND_TIME = 90.0;
+/**
+ * A round's clock, in the same proportion to the ground as the original 90 seconds
+ * was to an 84 × 78 m map. Without this the mode still "works" and every round ends
+ * in a timeout draw, because the point is 45% further from the spawn line and the
+ * soldiers cannot cross it in 90 seconds any more — a change nobody asked for,
+ * smuggled in by a resize.
+ */
+const ROUND_TIME = 90.0 * MAP_SCALE;
 const ROUND_HOLD = 3.5;        // beat between the last kill and the next round
 const ROUNDS_TO_WIN = 3;       // best of five
 

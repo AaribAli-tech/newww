@@ -437,6 +437,78 @@ const kills = await race('the kill-feedback checks', () => page.evaluate(async (
         p.update(1 / 60, performance.now() / 1000 + i / 60);
         gg.update(1 / 60);
     }
+    // ── map size ─────────────────────────────────────────────────────────────
+    // The whole world is authored at 84 × 78 m and multiplied by one constant. If
+    // any layer forgot to follow — colliders, spawn tables, fog, the sky — this is
+    // where it shows: the fence either moved, or the houses did, or a soldier is
+    // standing inside a wall. So measure the built world, not the source text.
+    const BX = G.cw.boxes;
+    let mnx = Infinity, mxx = -Infinity, mnz = Infinity, mxz = -Infinity;
+    for (const b of BX) {
+        if (b.tag === 'bound' || b.tag === 'ground') continue;
+        if (b.minX < mnx) mnx = b.minX;
+        if (b.maxX > mxx) mxx = b.maxX;
+        if (b.minZ < mnz) mnz = b.minZ;
+        if (b.maxZ > mxz) mxz = b.maxZ;
+    }
+    let skyR = 0, desert = 0;
+    for (const o of G.scene.children) {
+        const g = o.geometry;
+        if (!g) continue;
+        if (g.type === 'SphereGeometry' && g.parameters.radius > 200) skyR = g.parameters.radius;
+        if (g.type === 'PlaneGeometry' && g.parameters.width > 500) desert = g.parameters.width;
+    }
+    // Nobody may be standing inside solid geometry — that is the failure mode of a
+    // table that did not scale with the colliders around it.
+    const scratch = [];
+    const inside = [];
+    const check = (who, pos) => {
+        if (!pos) return;
+        const r = 0.34;
+        for (const id of G.cw._query(pos.x - r, pos.z - r, pos.x + r, pos.z + r, scratch)) {
+            const b = BX[id];
+            if (b.tag === 'ground' || b.tag === 'bound') continue;
+            if (pos.y + 1.6 <= b.minY || pos.y >= b.maxY) continue;
+            if (pos.x + r <= b.minX || pos.x - r >= b.maxX) continue;
+            if (pos.z + r <= b.minZ || pos.z - r >= b.maxZ) continue;
+            inside.push(`${who} in ${b.tag}`);
+            return;
+        }
+    };
+    check('player', G.player.position);
+    for (const b of G.bots) if (b.alive) check(b.name, b.position);
+    // The playable envelope is the fence, not the scenery: props and backdrop sit
+    // outside it, so measuring every box overstates the map and proves nothing about
+    // the perimeter the spawns and clamps depend on. The chain-link and the invisible
+    // shell behind it are measured separately, because the failure worth catching is
+    // one of them being scaled while the other was not — a fence standing 27 m past
+    // the last house, or a shell buried under the street.
+    let fenceReach = 0, boundReach = 0, fenceN = 0, fenceZ0 = 0, fenceZ1 = 0;
+    for (const b of BX) {
+        if (b.tag === 'fence') {
+            fenceN++;
+            fenceReach = Math.max(fenceReach, Math.abs(b.minX), Math.abs(b.maxX));
+            if (b.minZ < fenceZ0) fenceZ0 = b.minZ;
+            if (b.maxZ > fenceZ1) fenceZ1 = b.maxZ;
+        } else if (b.tag === 'bound') {
+            boundReach = Math.max(boundReach, Math.abs(b.minX), Math.abs(b.maxX));
+        }
+    }
+    const fenceDepth = +(fenceZ1 - fenceZ0).toFixed(1);
+    const far = G.cw.groundHeight(fenceReach - 3, fenceReach * (78 / 84) - 3, 1.2, 0.42, []);
+    out.map = {
+        width: +(mxx - mnx).toFixed(1), depth: +(mxz - mnz).toFixed(1),
+        boxes: BX.length, stepHeight: +G.cw.stepHeight.toFixed(3),
+        fog: `${Math.round(G.scene.fog.near)}–${Math.round(G.scene.fog.far)}`, fogFar: G.scene.fog.far,
+        camFar: G.camera.far, skyR: Math.round(skyR), desert: Math.round(desert),
+        fenceReach: +fenceReach.toFixed(1), boundReach: +boundReach.toFixed(1), fenceBoxes: fenceN,
+        fenceDepth,
+        // uniform scaling means the two axes keep their ratio; anything else is a
+        // map that got stretched, which is a different and much uglier thing
+        aspect: +((mxz - mnz) / (mxx - mnx)).toFixed(4),
+        buried: inside, groundAtFarCorner: Number.isFinite(far) ? +far.toFixed(2) : 'NaN'
+    };
+
     // One gun, in one slot. Everything that could change the weapon gets pressed:
     // the promotion just landed, and the gun it landed on has to still be the gun
     // in hand — a ladder you can walk sideways off is not a ladder.
@@ -525,6 +597,14 @@ if (kills.error) {
         ` (${kills.gun.wrapped ? 'lapped' : 'DID NOT WRAP'}) · weapon ${kills.gun.gunBefore} → ${kills.gun.gunAfter}` +
         ` · hud ${JSON.stringify(kills.gun.hud)} · no friendlies: ${kills.gun.nobodyOnYourTeam}` +
         ` · shootable: ${kills.gun.everyBotShootable}`);
+    log(` map size          fence line at ±${kills.map.fenceReach} m (was ±42) · shell at` +
+        ` ±${kills.map.boundReach} · ${kills.map.fenceBoxes} fence boxes · envelope` +
+        ` ${kills.map.width} × ${kills.map.depth} m (fence ${kills.map.fenceDepth} m deep)` +
+        ` · ${kills.map.boxes}` +
+        ` colliders · step ${kills.map.stepHeight} m · fog ${kills.map.fog} m · far` +
+        ` ${kills.map.camFar} · sky dome r${kills.map.skyR} · ground at the far corner` +
+        ` ${kills.map.groundAtFarCorner} · nobody buried in a wall: ${kills.map.buried.length === 0}` +
+        (kills.map.buried.length ? ` (${kills.map.buried.slice(0, 3).join(', ')})` : ''));
     log(` one gun / one slot  loadout ${kills.gun.loadout} · locked: ${kills.gun.noSwap} · 1-4 + Q + wheel` +
         ` ${kills.gun.keysIgnored ? 'ignored' : 'CHANGED THE GUN'} · gun #${kills.gun.other}` +
         ` out of reach: ${kills.gun.otherRefused} · slots on screen: ${kills.gun.liveSlots}` +
@@ -551,6 +631,14 @@ const killsOk = !kills.error &&
     kills.gun.everyBotShootable === true &&
     kills.ffa.modeReady === true &&
     kills.gun.rungs === 4 && kills.gun.target === 75 &&
+    kills.map.width > 84 && kills.map.depth > 78 &&
+    kills.map.fenceReach > 42 * 1.4 && kills.map.fenceReach < 42 * 1.45 + 1.5 &&
+    kills.map.boundReach > kills.map.fenceReach && kills.map.boundReach - kills.map.fenceReach < 4 &&
+    kills.map.fenceBoxes >= 4 &&   // four sides of chain-link, plus the yard picket runs
+    kills.map.fenceDepth > 78 * 1.4 && kills.map.fenceDepth < 78 * 1.45 + 2.5 &&
+    kills.map.stepHeight > 0.55 && kills.map.buried.length === 0 &&
+    Number.isFinite(kills.map.groundAtFarCorner) &&
+    kills.map.skyR === 400 && kills.map.camFar > kills.map.fogFar &&
     kills.gun.noSwap === true && kills.gun.keysIgnored === true &&
     kills.gun.otherRefused === true && kills.gun.liveSlots === 1 &&
     kills.gun.labelMatchesMode === true &&

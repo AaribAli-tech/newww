@@ -7,6 +7,7 @@
 // ============================================================================
 import * as THREE from 'three';
 import * as M from './materials.js';
+import { MAP_SCALE } from './utils.js';
 import { playUAV, playJetPass, playExplosion, playNukeSiren, playNukeBlast, duckAudio } from './audio.js';
 
 export const STREAKS = [
@@ -168,7 +169,11 @@ export class Killstreaks {
             if (a.kind === 'uav') {
                 const k = a.t / a.dur;
                 const ang = k * Math.PI * 2.2;
-                a.obj.position.set(Math.cos(ang) * 62, 34 + Math.sin(ang * 2) * 3, Math.sin(ang) * 48);
+                // An ellipse around the block, so the orbit has to grow with the block:
+                // a UAV circling the old footprint would spend the match over the same
+                // three houses while the rest of the map goes unwatched.
+                a.obj.position.set(Math.cos(ang) * 62 * MAP_SCALE,
+                    34 + Math.sin(ang * 2) * 3, Math.sin(ang) * 48 * MAP_SCALE);
                 a.obj.rotation.y = -ang + Math.PI / 2;
                 a.obj.rotation.z = Math.sin(ang) * 0.25;
                 if (a.t >= a.dur) { this.ctx.scene.remove(a.obj); this.active.splice(i, 1); }

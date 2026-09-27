@@ -22,7 +22,7 @@ import { vmAssets, vmAssetsReady } from './vmassets.js';
 import { upgradeTextures, photoStatus } from './materials.js';
 import { mergeStaticScene, mergeRig, pruneShadowCasters } from './optimize.js';
 import { WEAPON_DEFS } from './weapons.js';
-import { TEAM_A, TEAM_B, BOT_NAMES_A, BOT_NAMES_B, randElement, clamp, shuffle } from './utils.js';
+import { TEAM_A, TEAM_B, BOT_NAMES_A, BOT_NAMES_B, randElement, clamp, shuffle, MAP_SCALE } from './utils.js';
 import * as A from './audio.js';
 
 const canvas = document.getElementById('gameCanvas');
@@ -247,7 +247,11 @@ function setupRenderer() {
     renderer.info.autoReset = false;
 
     scene = new THREE.Scene();
-    scene.fog = new THREE.Fog(0xcfc4ac, 110, 360);
+    // The haze is a distance, not a fraction of the map: an 84 m street and a 122 m
+    // one need the far end of the fog to sit at the same metre-marks relative to
+    // the ground, so both numbers scale with it. Without this the far houses would
+    // simply dissolve on a bigger map.
+    scene.fog = new THREE.Fog(0xcfc4ac, 110 * MAP_SCALE, 360 * MAP_SCALE);
 
     camera = new THREE.PerspectiveCamera(78, window.innerWidth / window.innerHeight, 0.06, 700);
     scene.add(camera);

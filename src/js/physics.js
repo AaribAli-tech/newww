@@ -27,6 +27,12 @@ export class CollisionWorld {
         };
         const idx = this.boxes.push(b) - 1;
         this._stamps.push(-1);
+        this._span(b, idx);
+        return b;
+    }
+
+    /** File a box into every grid cell it touches. */
+    _span(b, idx) {
         for (let cx = Math.floor(b.minX / CELL); cx <= Math.floor(b.maxX / CELL); cx++) {
             for (let cz = Math.floor(b.minZ / CELL); cz <= Math.floor(b.maxZ / CELL); cz++) {
                 const key = cx * 10007 + cz;
@@ -35,7 +41,32 @@ export class CollisionWorld {
                 arr.push(idx);
             }
         }
-        return b;
+    }
+
+    /**
+     * Scale the world in place.
+     *
+     * The grid buckets are keyed by cell coordinate, so they cannot survive a
+     * resize: a stale grid would answer a query with boxes that moved away and
+     * miss the wall that is now in the way. So every box is multiplied about the
+     * origin (the same transform the meshes get) and the broadphase is rebuilt
+     * from scratch — once, at load, before a single frame is drawn.
+     *
+     * stepHeight goes with it. Every step, kerb and porch flight in the map grew,
+     * and a soldier who could walk up the old one must still be able to walk up
+     * the new one, or the upstairs of both houses quietly becomes unreachable.
+     */
+    rescale(k) {
+        if (!Number.isFinite(k) || k <= 0 || k === 1) return 0;
+        for (const b of this.boxes) {
+            b.minX *= k; b.maxX *= k;
+            b.minY *= k; b.maxY *= k;
+            b.minZ *= k; b.maxZ *= k;
+        }
+        this.grid.clear();
+        for (let i = 0; i < this.boxes.length; i++) this._span(this.boxes[i], i);
+        this.stepHeight *= k;
+        return this.boxes.length;
     }
 
     addBoxMesh(mesh, tag) {

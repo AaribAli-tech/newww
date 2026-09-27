@@ -19,7 +19,7 @@
 // ============================================================================
 import * as THREE from 'three';
 import * as M from './materials.js';
-import { MAP_RECT } from './utils.js';
+import { MAP_RECT, MAP_RECT_AUTHORED, MAP_SCALE } from './utils.js';
 
 /** The one rectangle both the geometry and the entities agree on (utils.js). */
 export const MAP_BOUNDS = MAP_RECT;
@@ -1488,7 +1488,12 @@ export function buildNuketown(scene, cw) {
     nuketownSign();
 
     // ── perimeter ──
-    const B = MAP_BOUNDS;
+    // Authored metres, on purpose: the fence is built out of box() like every
+    // other prop, so applyWorldScale multiplies it along with them. Reading
+    // MAP_BOUNDS here would scale the perimeter twice and park the chain-link tens
+    // of metres past the last house — a wide, flat, empty nothing between the town
+    // and its fence, which reads as a broken map long before it reads as a big one.
+    const B = MAP_RECT_AUTHORED;
     chainLinkRun(B.minX, B.minZ, B.maxX, B.minZ, 3.2);
     chainLinkRun(B.minX, B.maxZ, B.maxX, B.maxZ, 3.2);
     chainLinkRun(B.minX, B.minZ, B.minX, B.maxZ, 3.2);
@@ -1499,8 +1504,9 @@ export function buildNuketown(scene, cw) {
     cw.addAABB(B.minX - 2, 0, B.minZ - 2, B.maxX + 2, 16, B.minZ - 0.4, 'bound');
     cw.addAABB(B.minX - 2, 0, B.maxZ + 0.4, B.maxX + 2, 16, B.maxZ + 2, 'bound');
 
-    // world floor
-    cw.addAABB(-200, -1.0, -200, 200, 0.0, 200, 'ground');
+    // world floor — authored half-width, scaled with everything else, and still
+    // far bigger than the map so a soldier can never find its edge
+    cw.addAABB(-140, -1.0, -140, 140, 0.0, 140, 'ground');
 
     distantTerrain(scene);
     const sky = buildSky(scene);
@@ -1520,11 +1526,103 @@ export function buildNuketown(scene, cw) {
     dust.name = 'dust';
     scene.add(dust);
 
+    // Everything above is authored in metres for an 84 × 78 map, and this is the
+    // one place the size of the world is decided — so no builder function, and no
+    // prop placed by hand, has to remember to multiply anything. Objects move out,
+    // objects grow, collision boxes follow, and tiling textures get denser so a
+    // wall still reads as the same siding rather than siding 45% wider.
+    applyWorldScale(scene, cw, MAP_SCALE, sky.mesh);
+
     validateWaypoints(cw);
 
     CTX = null;
     return { sky: sky.mesh, skyMat: sky.mat, dust };
 }
+
+/**
+ * Grow (or shrink) the entire built world about the origin, exactly once, after
+ * the last prop is placed and before anything dynamic joins the scene.
+ *
+ * Doing it here instead of in the authoring constants is the point: the map is
+ * ~2100 meshes placed by sixty-odd builder functions, and a scale that has to be
+ * remembered in each one is a scale that gets forgotten in one. Every object the
+ * map added is a top-level mesh, line or group, so scaling its position and its
+ * own scale is enough — geometry authored around the object's origin grows with it,
+ * and a group (a car, a bus) carries its children along.
+ *
+ * The sky dome is skipped on purpose. It is a backdrop at a fixed radius, not
+ * ground the player walks on, and pushing it further out would take it past the
+ * camera's far plane on some aspect ratios.
+ *
+ * Textures are the subtle half. A tiled surface carries `repeat`, which counts
+ * tiles per surface, not per metre — so a wall that grows 45% keeps exactly the
+ * same number of siding planks across it, and the planks stretch. Dividing the
+ * repeat by the factor puts the plank width back where it was. Only textures with
+ * RepeatWrapping get that treatment: a clamped one (the NUKETOWN sign, a house
+ * number plate) is sized to its surface and is meant to grow with it, and
+ * cropping it would show half a sign.
+ */
+function applyWorldScale(scene, cw, k, skip) {
+    if (!Number.isFinite(k) || k <= 0) return;
+
+    for (const o of scene.children) {
+        if (o === skip || !(o.isMesh || o.isLine || o.isLineSegments || o.isPoints)) continue;
+        o.position.multiplyScalar(k);
+        if (k !== 1) o.scale.multiplyScalar(k);
+    }
+
+    cw.rescale(k);
+
+    if (k !== 1) {
+        const seen = new Set();
+        const REP = THREE.RepeatWrapping;
+        const SLOTS = ['map', 'normalMap', 'roughnessMap', 'metalnessMap', 'aoMap',
+            'bumpMap', 'emissiveMap', 'alphaMap', 'lightMap', 'displacementMap'];
+        const fix = mat => {
+            if (!mat) return;
+            for (const slot of SLOTS) {
+                const t = mat[slot];
+                if (!t || !t.isTexture || seen.has(t.uuid)) continue;
+                seen.add(t.uuid);
+                if (t.wrapS === REP) t.repeat.x /= k;
+                if (t.wrapT === REP) t.repeat.y /= k;
+            }
+        };
+        for (const o of scene.children) {
+            if (o === skip) continue;
+            const m = o.material;
+            if (Array.isArray(m)) { for (const x of m) fix(x); } else fix(m);
+        }
+    }
+
+    scaleMinimap(k);
+}
+
+/** Minimap geometry is authored in world metres, so it has to move with the map. */
+function scaleMinimap(k) {
+    if (k === 1) return;
+    const KEYS = ['x', 'y', 'z', 'r', 'x0', 'x1', 'z0', 'z1'];
+    const flat = o => { for (const key of KEYS) if (Number.isFinite(o[key])) o[key] *= k; return o; };
+    flat(MINIMAP.road);
+    flat(MINIMAP.circle);
+    for (const q of MINIMAP.rects) flat(q);
+    // fences are plain [x0, z0, x1, z1] tuples, drawn as line segments
+    for (const f of MINIMAP.fences) for (let i = 0; i < f.length; i++) f[i] *= k;
+    // `bounds` is left alone: it is MAP_BOUNDS, which is scaled where it is defined
+}
+
+/**
+ * Gameplay tables live outside the scene graph, so they get scaled here rather
+ * than by the pass above. A spawn point or nav node left in old metres would
+ * still be *valid ground* — that is what makes this bug invisible — it would just
+ * clump every soldier into the middle 70% of a bigger map, and the waypoints would
+ * end up inside the new walls, which validateWaypoints then reports.
+ */
+const atScale = list => list.map(n => {
+    const o = { ...n, x: n.x * MAP_SCALE, z: n.z * MAP_SCALE };
+    if (Number.isFinite(n.y)) o.y = n.y * MAP_SCALE;      // perch heights too
+    return o;
+});
 
 /**
  * Assert that every navigation node is somewhere a soldier can actually stand.
@@ -1584,8 +1682,8 @@ const SPAWN_EAST = [
     { x: 34.0, z: -9.0 }, { x: 34.0, z: 5.0 },
     { x: 36.6, z: -4.0 }, { x: 36.6, z: 0.0 }
 ];
-export const SPAWN_A = SPAWN_EAST.map(mirrorXZ);   // west team, behind the teal house
-export const SPAWN_B = SPAWN_EAST.slice();          // east team, behind the yellow house
+export const SPAWN_A = atScale(SPAWN_EAST.map(mirrorXZ));   // west team, behind the teal house
+export const SPAWN_B = atScale(SPAWN_EAST.slice());         // east team, behind the yellow house
 
 // ── navigation nodes ────────────────────────────────────────────────────────
 // The bots steer in XZ and let the physics decide their height, so every node
@@ -1635,12 +1733,12 @@ const EAST_NODES = [
 ];
 
 /** Navigation nodes — all on walkable ground, none inside a wall. */
-export const WAYPOINTS = [
+export const WAYPOINTS = atScale([
     ...AXIS_NODES,
     ...RING_NODES,
     ...EAST_NODES,
     ...EAST_NODES.map(mirrorXZ)
-];
+]);
 
 // ── elevated holds ──────────────────────────────────────────────────────────
 const EAST_PERCHES = [
@@ -1656,11 +1754,11 @@ const AXIS_PERCHES = [
 ];
 
 /** Elevated positions bots may hold. */
-export const PERCHES = [
+export const PERCHES = atScale([
     ...AXIS_PERCHES,
     ...EAST_PERCHES,
     ...EAST_PERCHES.map(mirrorXYZ)
-];
+]);
 
 // ── minimap ─────────────────────────────────────────────────────────────────
 const EAST_RECTS = [
