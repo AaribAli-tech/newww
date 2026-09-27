@@ -437,8 +437,33 @@ const kills = await race('the kill-feedback checks', () => page.evaluate(async (
         p.update(1 / 60, performance.now() / 1000 + i / 60);
         gg.update(1 / 60);
     }
+    // One gun, in one slot. Everything that could change the weapon gets pressed:
+    // the promotion just landed, and the gun it landed on has to still be the gun
+    // in hand — a ladder you can walk sideways off is not a ladder.
+    const held = p.current;
+    const other = [0, 1, 2, 3].find(i => i !== held);
+    p.useSlot(other);
+    p.cycleSlot(1);
+    p.cycleSlot(-1);
+    for (const d of [1, 2, 3, 4]) {
+        window.dispatchEvent(new KeyboardEvent('keydown', { code: 'Digit' + d, bubbles: true }));
+    }
+    window.dispatchEvent(new KeyboardEvent('keydown', { code: 'KeyQ', bubbles: true }));
+    window.dispatchEvent(new WheelEvent('wheel', { deltaY: 120, bubbles: true }));
+    window.dispatchEvent(new WheelEvent('wheel', { deltaY: -120, bubbles: true }));
+    for (let i = 0; i < 30; i++) { p.update(1 / 60, performance.now() / 1000 + i / 60); gg.update(1 / 60); }
+    const liveSlots = [...document.querySelectorAll('#slots .slot')]
+        .filter(el => el.style.display !== 'none').length;
+    const litSlot = document.querySelector('#slots .slot.on');
     out.gun = {
         name: gg.name, rungs: gg.rungs, target: gg.killTarget,
+        // the mode owns the weapon: one entry, locked, and every input refused
+        loadout: JSON.stringify(p.loadout || null), noSwap: p.noSwap === true,
+        keysIgnored: p.current === held, held, other,
+        otherRefused: other !== undefined && p.canHold(other) === false,
+        liveSlots, litSlot: litSlot ? litSlot.textContent.trim() : '',
+        // the left panel must name the mode that is actually running
+        modeLine: txt('#modeLine'), labelMatchesMode: /gun game/i.test(txt('#modeLine')),
         killsBefore, killsAfter: p._ggKills | 0, wrapped: (p._ggRung | 0) === 0,
         ladderRung: gg.rung,
         hud: txt('#modePrimary'), next: txt('#modeLine'),
@@ -500,6 +525,10 @@ if (kills.error) {
         ` (${kills.gun.wrapped ? 'lapped' : 'DID NOT WRAP'}) · weapon ${kills.gun.gunBefore} → ${kills.gun.gunAfter}` +
         ` · hud ${JSON.stringify(kills.gun.hud)} · no friendlies: ${kills.gun.nobodyOnYourTeam}` +
         ` · shootable: ${kills.gun.everyBotShootable}`);
+    log(` one gun / one slot  loadout ${kills.gun.loadout} · locked: ${kills.gun.noSwap} · 1-4 + Q + wheel` +
+        ` ${kills.gun.keysIgnored ? 'ignored' : 'CHANGED THE GUN'} · gun #${kills.gun.other}` +
+        ` out of reach: ${kills.gun.otherRefused} · slots on screen: ${kills.gun.liveSlots}` +
+        ` (${JSON.stringify(kills.gun.litSlot)}) · panel reads ${JSON.stringify(kills.gun.modeLine)}`);
 }
 // The gate is a promise about the bots, so check both halves: that it asked and
 // closed, and that the numbers it stands for are the ones ai.js reads.
@@ -522,6 +551,9 @@ const killsOk = !kills.error &&
     kills.gun.everyBotShootable === true &&
     kills.ffa.modeReady === true &&
     kills.gun.rungs === 4 && kills.gun.target === 75 &&
+    kills.gun.noSwap === true && kills.gun.keysIgnored === true &&
+    kills.gun.otherRefused === true && kills.gun.liveSlots === 1 &&
+    kills.gun.labelMatchesMode === true &&
     kills.gun.killsAfter === kills.gun.killsBefore + 1 && kills.gun.wrapped === true &&
     kills.gun.gunAfter !== kills.gun.gunBefore && kills.gun.state === 'playing' &&
     kills.ffa.allBotsHostile === true &&

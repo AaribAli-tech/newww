@@ -627,6 +627,9 @@ class GunGame extends BaseMode {
         this.disabledStreaks = new Set(['uav', 'air', 'nuke']);
         this.rungs = LADDER.length;
         this.killTarget = GUN_GAME_KILLS;
+        // The whole ladder is four guns, so the viewmodel builds those four and
+        // not the other eleven the player is never allowed to hold.
+        this.warmGuns = LADDER.slice();
         this._capKills = -1;
         this.reset();
     }
@@ -639,7 +642,10 @@ class GunGame extends BaseMode {
         this.championKills = 0;
         this._capKey = null;
         const p = this.player;
-        if (p) { p._ggRung = 0; p._ggKills = 0; }
+        if (p) {
+            p._ggRung = 0; p._ggKills = 0;
+            if (p.setLoadout) p.setLoadout(null);     // until onMatchStart locks it
+        }
         const bots = this.bots();
         for (let i = 0; i < bots.length; i++) if (bots[i]) { bots[i]._ggRung = 0; bots[i]._ggKills = 0; }
     }
@@ -715,7 +721,8 @@ class GunGame extends BaseMode {
         if (mine) {
             this._equipPlayer(LADDER[next]);
             this.banner(next === 0 ? `LAP ${lap} — back to ${this._nameAt(0)}` : `LEVEL ${next + 1}`,
-                '#67c6ff', `${this._nameAt(next)} · ${e._ggKills}/${this.killTarget} kills`);
+                '#67c6ff', `${this._nameAt(next)} · ${e._ggKills}/${this.killTarget} kills`
+                + (next === LADDER.length - 1 ? ' · last gun, then it cycles' : ''));
         } else if (e.setWeapon) {
             e.setWeapon(LADDER[next]);
             if (this.killTarget - e._ggKills <= 5) {
@@ -804,6 +811,10 @@ class GunGame extends BaseMode {
         const p = this.player;
         if (!p || !inRange(idx)) return;
         this._want = idx;
+        // One gun, one slot: the rung you are on is the only weapon you own, so
+        // 1-4 / Q / the wheel cannot dodge into a better gun. Set before the
+        // switch, since switchTo is what enforces it.
+        if (p.setLoadout) p.setLoadout([idx]);
         // A fresh rung starts loaded; otherwise a promotion mid-firefight hands
         // you a gun with whatever was left in it last time.
         const mag = p.weapons && p.weapons[idx], def = DEFS[idx];

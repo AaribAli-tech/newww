@@ -413,7 +413,9 @@ function setupPlayerRig() {
         getBots: () => bots,
         onHit: onPlayerHit,
         onPlayerDeath: onPlayerDeath,
-        useStreak: id => tryStreak(id)
+        useStreak: id => tryStreak(id),
+        onLoadout: list => hud.setLoadout(list),
+        onRefusedSwap: refuseSwapHint
     });
 
     hud.onStreakClick(tryStreak);
@@ -785,10 +787,19 @@ function startMatch() {
         player, getBots: () => bots, hud, effects, scene, audio: A
     });
     gamemode.reset();
+    // The armory is the default; a mode that owns your weapon (Gun Game) locks it
+    // to one gun from its own onMatchStart. Cleared here so a match after a Gun
+    // Game does not inherit the lock and leave you holding a pistol forever.
+    if (player.setLoadout) player.setLoadout(null);
     // Hands the HUD the ruleset: it labels the mode line, takes the score limit
     // from the mode (Round Control wins at 3 rounds, not 75 kills) and hides the
     // streak row for modes that do not use killstreaks. Nothing used to call this.
     hud.setMode(gamemode);
+    // Build the viewmodels this mode can actually hand you. In Gun Game that is
+    // four guns instead of fifteen, which is eleven fewer model built, uploaded and
+    // kept in memory for a match where you could never hold them.
+    if (gamemode.warmGuns && vm.queueOnly) vm.queueOnly(gamemode.warmGuns);
+    else vm.queueAll();
     streaks.reset();
     effects.clearHoles();
 
@@ -955,10 +966,28 @@ function tryStreak(id) {
     if (state !== 'playing' || !player.alive) return;
     if (!streaks.canUse(id)) {
         const p = streaks.progress(id);
-        if (!streaks.used[id]) hud.banner('NOT READY', 'rgba(255,255,255,.6)', `${p.have}/${p.need} kills`);
+        // `enabled` matters: Free For All and Gun Game have no rewards to call in,
+        // and telling a player they are 3/7 kills from an airstrike that does not
+        // exist in this mode is a promise the match will never keep.
+        if (p.enabled && !streaks.used[id]) {
+            hud.banner('NOT READY', 'rgba(255,255,255,.6)', `${p.have}/${p.need} kills`);
+        }
         return;
     }
     streaks.use(id);
+}
+
+/**
+ * Trying to change weapons in a one-gun mode. Throttled, because the natural
+ * reaction to being handed a shotgun is to mash 1-4 and Q.
+ */
+let _refusedAt = -1e9;
+function refuseSwapHint() {
+    const now = performance.now();
+    if (now - _refusedAt < 2500) return;
+    _refusedAt = now;
+    const gg = gamemode && gamemode.killTarget ? `${gamemode.killTarget} kills wins` : 'the ladder moves you on a kill';
+    hud.banner('ONE GUN AT A TIME', '#FFC24A', gg);
 }
 
 // ── bot event handling ──────────────────────────────────────────────────────

@@ -139,6 +139,22 @@ export class ViewModel {
     }
 
     /**
+     * Queue exactly these weapons and forget the rest. A mode where the player can
+     * only ever hold four of the fifteen should not spend its spare frames building
+     * the other eleven, which is pure cost and zero benefit.
+     */
+    queueOnly(list) {
+        if (!Array.isArray(list) || !list.length) return this.queueAll();
+        const n = this.models.length;
+        const keep = list.filter(i => Number.isInteger(i) && i >= 0 && i < n);
+        if (!keep.length) return this.queueAll();
+        const cur = this.current;
+        this._queue = keep.filter(i => !this.models[i])
+            .sort((a, b) => (a === cur ? -1 : b === cur ? 1 : 0) || a - b);
+        return this._queue.length;
+    }
+
+    /**
      * Build (and, with a renderer, draw once) whatever is queued, for as long as the
      * frame can spare.
      *

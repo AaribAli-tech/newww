@@ -135,6 +135,7 @@ export class HUD {
             ammoCur: $('ammoCur'), ammoRes: $('ammoRes'),
             fireMode: $('fireMode'), fireStrip: $('fireStrip'), reloadHint: $('reloadHint'),
             slotRow: $('slots'), slots: document.querySelectorAll('.slot'),
+            equipRow: $('equip'),
             eqLethal: $('eqLethal'), eqTactical: $('eqTactical'),
             killfeed: $('killfeed'), eventFeed: $('eventFeed'),
             damageVig: $('damageVig'), lowHp: $('lowHp'), dmgDirs: $('dmgDirs'),
@@ -191,6 +192,11 @@ export class HUD {
         };
         this._resetCaches();
         this.setEquipment(this.equip.lethal, this.equip.tactical);
+        // There is no grenade system in the game — no throw, no inventory, no key
+        // that does anything — so these two boxes were promising equipment nobody can
+        // ever use. Hidden, not deleted: the markup and the labels are exactly what
+        // a real frag and stun would need, so whoever builds them un-hides this line.
+        if (this.el.equipRow) this.el.equipRow.style.display = 'none';
     }
 
     _resetCaches() {
@@ -272,6 +278,30 @@ export class HUD {
     }
 
     /** Each argument is {label, icon, count}; anything missing keeps its value. */
+    /**
+     * What the strip at the bottom of the screen represents. `null` is the stock
+     * 1-4 armory; a list rewrites those boxes into exactly the guns the mode allows,
+     * by name — so a mode that hands out one gun shows one box, and there is no
+     * second box to click that would promise a weapon you are not allowed to have.
+     */
+    setLoadout(list) {
+        this._loadout = Array.isArray(list) && list.length ? list.slice() : null;
+        const slots = this.el.slots;
+        for (let i = 0; i < slots.length; i++) {
+            const w = this._loadout ? this._loadout[i] : i;
+            // A one-gun loadout leaves three of these boxes with nothing in them,
+            // so the def lookup can legitimately miss — that has to be a blanked
+            // box, not a thrown error inside onMatchStart (which takes the whole
+            // match start down with it: no bots, no banner, no ladder).
+            const d = w === undefined || w === null ? null : (WEAPON_DEFS[w] || null);
+            slots[i].style.display = d ? '' : 'none';
+            txt(slots[i], d ? (this._loadout ? (d.short || d.name) : String(i + 1)) : '');
+            slots[i].classList.toggle('on', !!this._loadout && i === 0);
+        }
+        if (this.el.slotRow) this.el.slotRow.classList.toggle('hidden', !this._loadout && !slots.length);
+        this._lastSlot = -1;           // next HUD frame re-lights the held gun
+    }
+
     setEquipment(lethal, tactical) {
         this._equipSlot(this.el.eqLethal, this.equip.lethal, lethal);
         this._equipSlot(this.el.eqTactical, this.equip.tactical, tactical);
@@ -336,12 +366,24 @@ export class HUD {
         }
         if (player.current !== this._lastSlot) {
             this._lastSlot = player.current;
-            this.el.slots.forEach((el, i) => el.classList.toggle('on', i === player.current));
-            if (this.el.slotRow) {
-                // Only meaningful for the four-weapon loadout — Gun Game hands
-                // out one gun at a time off a 15-long ladder.
-                const n = player.weapons ? player.weapons.length : 4;
-                this.el.slotRow.classList.toggle('hidden', n < 2 || n > this.el.slots.length);
+            const lo = this._loadout;
+            if (lo) {
+                // The mode owns the weapon: one box, named, and nothing else to
+                // click. Slot order follows the loadout, not the master list.
+                for (let i = 0; i < this.el.slots.length; i++) {
+                    const held = lo[i] === player.current;
+                    this.el.slots[i].classList.toggle('on', held);
+                    if (held) this.el.slots[i].textContent = (WEAPON_DEFS[lo[i]] || {}).short || '';
+                }
+                if (this.el.slotRow) this.el.slotRow.classList.remove('hidden');
+            } else {
+                this.el.slots.forEach((el, i) => el.classList.toggle('on', i === player.current));
+                if (this.el.slotRow) {
+                    // Only meaningful for the four-weapon loadout — a one-gun mode
+                    // paints its own single box above.
+                    const n = player.weapons ? player.weapons.length : 4;
+                    this.el.slotRow.classList.toggle('hidden', n < 2 || n > this.el.slots.length);
+                }
             }
         }
         if (player.equipment) this.setEquipment(player.equipment.lethal, player.equipment.tactical);

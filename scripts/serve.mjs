@@ -49,7 +49,10 @@ const MIME = {
 // Mirrors vercel.json so the preview is an honest one.
 function cacheFor(ext, rel) {
     if (rel === 'sw.js') return 'no-cache, no-store, must-revalidate';
-    if (rel === 'index.html') return 'public, max-age=0, must-revalidate';
+    // Every HTML page, not just the root one. The bundles a page loads are named
+    // by content hash, so a week-old /tester/index.html would ask for a file the
+    // last build deleted and paint nothing but a blank screen.
+    if (ext === '.html') return 'public, max-age=0, must-revalidate';
     if (rel === 'manifest.webmanifest') return 'public, max-age=3600, must-revalidate';
     if (ext === '.js' && /(^|\/)js\//.test(rel)) return 'public, max-age=31536000, immutable';
     if (ext === '.woff2') return 'public, max-age=31536000, immutable';

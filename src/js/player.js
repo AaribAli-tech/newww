@@ -66,6 +66,11 @@ export class Player {
             ammo: d.magSize, reserve: d.reserve, reloading: false, reloadEnd: 0
         }));
         this.current = 0;
+        // What the mode lets you carry. Null is the whole armory — that is the
+        // team modes. A one-element list (Gun Game's current rung) means one gun
+        // in one slot, and every input that changes the weapon is refused.
+        this.loadout = null;
+        this.noSwap = false;
 
         this.lastFire = -9999;
         this.spread = 0;
@@ -94,11 +99,11 @@ export class Player {
             if (!this.alive) return;
             if (e.code === 'KeyC') this.isCrouching = !this.isCrouching;
             if (e.code === 'KeyR') this.startReload();
-            if (e.code === 'Digit1') this.switchTo(0);
-            if (e.code === 'Digit2') this.switchTo(1);
-            if (e.code === 'Digit3') this.switchTo(2);
-            if (e.code === 'Digit4') this.switchTo(3);
-            if (e.code === 'KeyQ') this.switchTo((this.current + 1) % WEAPON_DEFS.length);
+            if (e.code === 'Digit1') this.useSlot(0);
+            if (e.code === 'Digit2') this.useSlot(1);
+            if (e.code === 'Digit3') this.useSlot(2);
+            if (e.code === 'Digit4') this.useSlot(3);
+            if (e.code === 'KeyQ') this.cycleSlot(1);
             if (e.code === 'KeyZ') this.ctx.useStreak('uav');
             if (e.code === 'KeyX') this.ctx.useStreak('air');
             if (e.code === 'KeyV') this.ctx.useStreak('nuke');
@@ -132,16 +137,54 @@ export class Player {
         window.addEventListener('contextmenu', e => e.preventDefault());
         window.addEventListener('wheel', e => {
             if (!this.locked || !this.alive) return;
-            const n = WEAPON_DEFS.length;
-            this.switchTo((this.current + (e.deltaY > 0 ? 1 : n - 1)) % n);
+            this.cycleSlot(e.deltaY > 0 ? 1 : -1);
         }, { passive: true });
     }
 
     get def() { return WEAPON_DEFS[this.current]; }
     get mag() { return this.weapons[this.current]; }
 
+    /**
+     * The ruleset says what you may hold. `null` is the whole armory; a list of
+     * one is Gun Game's rung, where the mode alone decides the weapon. Swapping
+     * is legal inside a multi-gun list, never outside it.
+     */
+    setLoadout(list) {
+        // Sanitised here rather than trusted at the call site: a bad index would
+        // otherwise reach the HUD as a slot with no weapon in it, and the ladder
+        // would promote you onto a gun that has no definition at all.
+        const keep = Array.isArray(list)
+            ? list.filter(i => Number.isInteger(i) && i >= 0 && i < WEAPON_DEFS.length) : [];
+        this.loadout = keep.length ? keep : null;
+        this.noSwap = !!this.loadout && this.loadout.length < 2;
+        if (this.ctx && this.ctx.onLoadout) this.ctx.onLoadout(this.loadout);
+    }
+
+    canHold(i) { return !this.loadout || this.loadout.indexOf(i) >= 0; }
+
+    /** Number keys. A locked loadout answers with the rule, not with a new gun. */
+    useSlot(i) {
+        if (this.noSwap) return this._refusedSwap();
+        this.switchTo(i);
+    }
+
+    /** Q and the scroll wheel. */
+    cycleSlot(dir) {
+        if (this.noSwap) return this._refusedSwap();
+        const n = WEAPON_DEFS.length;
+        this.switchTo((this.current + (dir > 0 ? 1 : n - 1)) % n);
+    }
+
+    _refusedSwap() {
+        const cb = this.ctx && this.ctx.onRefusedSwap;
+        if (cb) cb();
+    }
+
     switchTo(i) {
         if (i === this.current || i < 0 || i >= WEAPON_DEFS.length) return;
+        // Held by the mode's hand, not the player's: the ladder promotes through
+        // here, and the loadout it just set is what lets that one through.
+        if (!this.canHold(i)) return this._refusedSwap();
         if (!this.vm.requestSwitch(i)) return;
         this.mag.reloading = false;
         this.current = i;

@@ -100,7 +100,13 @@ export class Killstreaks {
         };
     }
 
-    canUse(id) { return this.progress(id).ready && !this.nukeActive; }
+    /**
+     * Ready, and allowed by the mode. `progress().ready` already folds the mode
+     * restriction in, but the gate belongs here as well: whatever calls this next
+     * (a button, a new keybind) must not be able to hand out a reward the ruleset
+     * switched off — a nuke in a mode that hides it would be a free match win.
+     */
+    canUse(id) { return this.isEnabled(id) && this.progress(id).ready && !this.nukeActive; }
 
     use(id) {
         if (!this.canUse(id)) return false;

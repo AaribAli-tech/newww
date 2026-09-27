@@ -781,5 +781,146 @@ group('utils.js — the perimeter is a clamp, not a mesh');
         /export const MAP_BOUNDS = MAP_RECT;/.test(map));
 }
 
+
+// ── 20. gun game: one gun, one slot, and the cycle never stops ───────────────
+group('gun game — one gun at a time until 75');
+{
+    const LAD = GUN_GAME_LADDER;
+    // The player's side of the contract, mirrored from player.js exactly: the mode
+    // may move you, the input may not. If those two rules ever drift apart this
+    // test goes red rather than the ladder silently breaking.
+    const mkPlayer = () => ({
+        alive: true, current: 0, loadout: null, noSwap: false,
+        kills: 0, deaths: 0, score: 0, killStreak: 0, matchKills: 0, team: TEAM_A,
+        weapons: WEAPON_DEFS.map(d => ({ ammo: d.magSize, reserve: d.reserve, reloading: false })),
+        setLoadout(list) {
+            this.loadout = Array.isArray(list) && list.length ? list.slice() : null;
+            this.noSwap = !!this.loadout && this.loadout.length < 2;
+        },
+        canHold(i) { return !this.loadout || this.loadout.indexOf(i) >= 0; },
+        switchTo(i) {
+            if (i === this.current || i < 0 || i >= WEAPON_DEFS.length) return;
+            if (!this.canHold(i)) return;
+            this.weapons[this.current].reloading = false;
+            this.current = i;
+        },
+        useSlot(i) { if (this.noSwap) return; this.switchTo(i); }
+    });
+
+    const player = mkPlayer();
+    const banners = [];
+    const mode = createMode('gun', {
+        player, getBots: () => [],
+        hud: { banner: (t, c, sub) => banners.push([t, sub]) },
+        effects: {}, scene: {}, audio: {}
+    });
+    ok('the mode fields a one-gun match around', mode.warmGuns && mode.warmGuns.length === LAD.length
+        && mode.killTarget === 75, JSON.stringify({ warm: mode.warmGuns, target: mode.killTarget }));
+
+    mode.onMatchStart();
+    ok('a fresh match puts you on the first ladder gun', player.current === LAD[0], `current ${player.current}`);
+    ok('…and holds nothing else', player.loadout && player.loadout.length === 1
+        && player.loadout[0] === LAD[0], JSON.stringify(player.loadout));
+    ok('…and that is a locked loadout', player.noSwap === true);
+
+    // The whole match, one kill at a time.
+    const seen = [], held = [];
+    for (let k = 1; k <= 75; k++) {
+        const before = player.current;
+        player.useSlot(0); player.useSlot(1); player.useSlot(2); player.useSlot(3);   // mashing the strip
+        if (player.current !== before) seen.push('input moved the gun at kill ' + k);
+        player.kills = k; player.matchKills = k;
+        mode.onKill(player, { team: TEAM_B, kills: 0, deaths: 0, score: 0 }, 'M4A1', false);
+        seen.push(player.current);
+        held.push(player.loadout ? player.loadout.length : 0);
+        mode.update(0.016);                     // the ladder's retry loop
+        seen[seen.length - 1] = player.current;
+    }
+    ok('mashing 1-4 never changes the gun you hold', !seen.some(s => String(s).startsWith('input')),
+        seen.find(x => typeof x === 'string') || 'all four keys ignored');
+    const want = [];
+    for (let k = 1; k <= 74; k++) want.push(LAD[k % LAD.length]);
+    ok('every kill walks the next rung, in order, wrapping at the end',
+        JSON.stringify(seen.slice(0, want.length)) === JSON.stringify(want),
+        `${seen.slice(0, 8).join(' ')} … ${seen.slice(-4).join(' ')}`);
+    ok('the cycle keeps going — four guns, ~19 laps, not a ladder that runs out',
+        LAD.length === 4 && new Set(seen).size === 4, 'guns seen: ' + [...new Set(seen)].join(','));
+    ok('you never hold more than one gun, not even for a frame',
+        held.every(h => h === 1), 'slot counts: ' + [...new Set(held)].join(','));
+    ok('the promotion is the only thing allowed to swap it',
+        mode._want === player.current, `want ${mode._want} · holding ${player.current}`);
+    ok('75 kills ends it, whoever got there', mode.isOver() === true && mode.result().won === true,
+        mode.result().subtitle);
+    ok('the HUD counts the kills it is really racing',
+        /^\d+ \/ 75$/.test(mode.hudState().primary) && /LAP/.test(mode.hudState().secondary),
+        JSON.stringify([mode.hudState().primary, mode.hudState().secondary]));
+    ok('a promotion onto the last gun says what happens next',
+        banners.some(b => /cycles/.test(b[1] || '')), banners.filter(b => /cycles/.test(b[1] || '')).length + ' hints');
+    ok('and a lap back to the top is announced as a lap',
+        banners.some(b => /^LAP \d+/.test(b[0])), banners.map(b => b[0]).filter(t => /^LAP/.test(t))[0] || 'none');
+
+    // A mode switch must not inherit the lock.
+    player.setLoadout(null);
+    const tdm = createMode('tdm', { player, getBots: () => [], hud: { banner() { } }, effects: {}, scene: {}, audio: {} });
+    tdm.onMatchStart();
+    ok('the team modes still carry the whole armory',
+        player.loadout === null && player.noSwap === false, JSON.stringify([player.loadout, player.noSwap]));
+
+    // Now the wiring, since these are the lines that go missing quietly.
+    const pl = await readFile(new URL('../src/js/player.js', import.meta.url), 'utf8');
+    const mj = await readFile(new URL('../src/js/main.js', import.meta.url), 'utf8');
+    const hd = await readFile(new URL('../src/js/hud.js', import.meta.url), 'utf8');
+    const md = await readFile(new URL('../src/js/modes.js', import.meta.url), 'utf8');
+    const vmd = await readFile(new URL('../src/js/viewmodel.js', import.meta.url), 'utf8');
+    ok('number keys go through the refusal, not straight to switchTo',
+        /Digit1'\) this\.useSlot\(0\)/.test(pl) && /KeyQ'\) this\.cycleSlot\(1\)/.test(pl)
+        && !/Digit\d'\) this\.switchTo/.test(pl));
+    ok('the scroll wheel is locked out too', /wheel[\s\S]{0,160}this\.cycleSlot\(e\.deltaY/.test(pl));
+    ok('switchTo is where the loadout is enforced, so nothing else can walk around it',
+        /if \(!this\.canHold\(i\)\) return this\._refusedSwap\(\);/.test(pl));
+    ok('the mode sets the loadout before it asks to switch',
+        md.indexOf('p.setLoadout([idx])') < md.indexOf('p.switchTo(idx)'),
+        'order matters — switchTo checks the list it is standing on');
+    ok('every match starts from the open armory',
+        /if \(player\.setLoadout\) player\.setLoadout\(null\);/.test(mj));
+    ok('a one-gun mode builds four viewmodels, not fifteen',
+        /gamemode\.warmGuns && vm\.queueOnly/.test(mj) && /queueOnly\(list\)/.test(vmd));
+    ok('the strip shows what you may carry and hides the rest',
+        /setLoadout\(list\)/.test(hd) && /slots\[i\]\.style\.display = d \? '' : 'none'/.test(hd));
+    ok('a slot the loadout does not fill is blanked, never dereferenced',
+        /\(WEAPON_DEFS\[w\] \|\| null\)/.test(hd)
+        && /txt\(slots\[i\], d \? \(this\._loadout \? \(d\.short \|\| d\.name\) : String\(i \+ 1\)\) : ''\)/.test(hd));
+    ok('the HUD does not promise grenades the game cannot throw',
+        /equipRow: \$\('equip'\)/.test(hd) && /this\.el\.equipRow\) this\.el\.equipRow\.style\.display = 'none'/.test(hd)
+        && !/throwGrenade|Grenade\b/.test(mj + pl));
+    ok('a bad index in a loadout is dropped before anyone reads it',
+        /list\.filter\(i => Number\.isInteger\(i\) && i >= 0 && i < WEAPON_DEFS\.length\)/.test(pl));
+    ok('and a locked strip is not hidden by the old four-weapon rule',
+        /if \(this\.el\.slotRow\) this\.el\.slotRow\.classList\.remove\('hidden'\);/.test(hd));
+    ok('trying to swap in a one-gun mode tells you the rule',
+        /onRefusedSwap: refuseSwapHint/.test(mj) && /hud\.banner\('ONE GUN AT A TIME'/.test(mj));
+    ok('and the hint is throttled, so mashing does not spam',
+        /now - _refusedAt < \d+/.test(mj));
+
+    // ── the bugs this hunt found, kept fixed on purpose ──────────────────────
+    const ks = await readFile(new URL('../src/js/killstreaks.js', import.meta.url), 'utf8');
+    const sv = await readFile(new URL('../scripts/serve.mjs', import.meta.url), 'utf8');
+    const au = await readFile(new URL('../src/js/audio.js', import.meta.url), 'utf8');
+    ok('a disabled killstreak is refused at the gate, not only in the HUD',
+        /canUse\(id\) \{ return this\.isEnabled\(id\) && this\.progress\(id\)\.ready/.test(ks));
+    ok('and the game does not promise a reward the mode removed',
+        /if \(p\.enabled && !streaks\.used\[id\]\)/.test(mj));
+    ok('every HTML page revalidates, not just the root one',
+        /ext === '\.html'\) return 'public, max-age=0, must-revalidate'/.test(sv)
+        && !/rel === 'index\.html'/.test(sv));
+    ok('all three sound primitives tear their chain down when they end',
+        /release\(src, \[g, lpf, hpf, send\]\)/.test(au) && /release\(o, \[g, send\]\)/.test(au)
+        && /release\(src, \[g, bp, send\]\)/.test(au)
+        && /src\.onended = \(\) =>/.test(au) && /try \{ n\.disconnect\(\); \}/.test(au)
+        && (au.match(/\n    release\(/g) || []).length === 3);
+    ok('the send gain is handed back so it can be disconnected too',
+        /return s;/.test(au.split('function out(')[1].split('\n\n')[0]));
+}
+
 console.log(`\n${fail === 0 ? '✓' : '✗'} ${pass} passed, ${fail} failed\n`);
 process.exit(fail === 0 ? 0 : 1);

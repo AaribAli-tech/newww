@@ -77,7 +77,26 @@ function out(node, sendVerb = 0.25) {
         const s = ctx.createGain();
         s.gain.value = sendVerb;
         node.connect(s); s.connect(verb);
+        return s;
     }
+    return null;
+}
+
+/**
+ * A sound is a handful of nodes wired into buses that live for the whole session,
+ * and nothing lets go of them: ten bots firing for a five-minute match is several
+ * thousand gains and filters still hanging off the compressor. Per spec they are
+ * collected once nothing plays into them, in practice the graph keeps growing and
+ * the first symptom is audio turning to crunch late in a session. So every source
+ * tears down its own chain when it ends, which is after the last sample, never
+ * during it.
+ */
+function release(src, nodes) {
+    if (!src) return;
+    src.onended = () => {
+        src.onended = null;
+        for (const n of nodes) { if (n) { try { n.disconnect(); } catch (e) { /* already torn down */ } } }
+    };
 }
 
 function noiseBuf(seconds) {
@@ -113,7 +132,8 @@ function noise(dur, vol, lp = 6000, hp = 120, sendVerb = 0.25, curve = 3) {
     const lpf = ctx.createBiquadFilter(); lpf.type = 'lowpass'; lpf.frequency.value = lp;
     const hpf = ctx.createBiquadFilter(); hpf.type = 'highpass'; hpf.frequency.value = hp;
     src.connect(hpf); hpf.connect(lpf); lpf.connect(g);
-    out(g, sendVerb);
+    const send = out(g, sendVerb);
+    release(src, [g, lpf, hpf, send]);
     src.start(t);
     src.stop(t + dur + 0.05);
     return { src, g, lpf };
@@ -135,7 +155,8 @@ function tone(freq, dur, vol, type = 'sine', slideTo = null, sendVerb = 0.1, del
     g.gain.exponentialRampToValueAtTime(vol, t + 0.004);
     g.gain.exponentialRampToValueAtTime(0.0005, t + dur);
     o.connect(g);
-    out(g, sendVerb);
+    const send = out(g, sendVerb);
+    release(o, [g, send]);
     o.start(t); o.stop(t + dur + 0.02);
     return o;
 }
@@ -154,7 +175,8 @@ function click(freq, dur, vol, delay = 0) {
     g.gain.setValueAtTime(vol, t);
     g.gain.exponentialRampToValueAtTime(0.0004, t + dur);
     src.connect(bp); bp.connect(g);
-    out(g, 0.12);
+    const send = out(g, 0.12);
+    release(src, [g, bp, send]);
     src.start(t); src.stop(t + dur + 0.02);
 }
 
