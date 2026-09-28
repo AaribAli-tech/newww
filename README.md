@@ -175,15 +175,16 @@ and never has to know which one it got.
 | `?rebel=all` | every bot, on both teams |
 | `?rebel=off` | the same as the default, spelled out |
 
-The default is `off` on purpose: the model is signed off on `/tester/` first, and one line in
-`src/js/rebel.js` (`DEFAULT_MODE`) makes it the shipped look afterwards. Free For All and Gun Game
-put the whole lobby on the enemy side, so `?rebel=enemy` there already means everyone.
+The default is `off` on purpose: the game ships with the GLB soldiers, and the FBX stays behind a
+query string until a model has actually been judged in a match. One line in `src/js/rebel.js`
+(`DEFAULT_MODE`) makes it the shipped look afterwards. Free For All and Gun Game put the whole lobby
+on the enemy side, so `?rebel=enemy` there already means everyone.
 
 If the FBX is missing or fails to parse, `loadRebel()` resolves false and the game carries on with
 the rigs it already had — an asset problem costs looks, not a match.
 
 Two things about the file itself needed measuring rather than assuming, and both live in
-`src/js/rebel-pose.js` so the game and the test page cannot drift apart:
+`src/js/rebel-pose.js` so the measurement and the animation cannot drift apart:
 
 * **It is bound upside-down inside its own rest pose.** With every bone at rotation 0 the hip→knee,
   knee→ankle and shoulder→elbow offsets all point at `+Y`: 14 of its 15 meshes are rigid parts
@@ -210,35 +211,6 @@ Its textures are rebound by material name (`Body_Material`, `Head_Material`, `Bo
 because the paths baked into the file are the author's own `C:\Users\...`, and a small team-coloured
 shoulder patch is added, because a soldier nobody can assign to a side is how "enemies I can't hit"
 got reported in the first place.
-
-## Trying a model on its own (`/tester/`)
-
-`public/tester/` is a separate page — an empty world with a firing range, built from
-`src/tester/tester.js`, for judging a character rig before it goes anywhere near the game. Move,
-sprint, crouch, jump, shoot dummies; flip to first person or an inspect orbit; toggle the skeleton,
-wireframe, textures and the model's height. `npm run build` builds it, or run it alone with
-`npm run tester`, then open `/tester/`.
-
-The model is on you **and on all seven range dummies**: when the FBX and its textures are ready, the
-page clones it (`SkeletonUtils.clone`, which is the only safe way to copy a skinned hierarchy) and
-dresses the range, each copy on a slow patrol so the walk cycle can be judged from the front, the
-back and both sides at once. `K` swaps the dummies back to the crude boxes — the boxes leave the
-scene when the model arrives, because three's raycaster does not skip invisible objects, so a shot
-that scores has to hit the actual mesh; head shots still count (the head is found by material name).
-The readout in the corner reports what it loaded, which textures it attached, how tall it is drawing,
-and whether the clones are on the range.
-
-It is wired to the **Modern Rebel Soldier** from `call-of-duty-asset-for-person`, which is a useful
-first patient: the file is a binary FBX with a `mixamorig:` skeleton and **no animation clips at
-all**, so every pose in the page (walk cycle, crouch bend, recoil) is produced procedurally from the
-movement state, and its texture paths are the author's own `C:\Users\...` — so the page rebinds
-`body.png` / `head.png` / `boots.png` by material name (`Body_Material`, `Head_Material`,
-`BootAndSkin_Material`) and shows you what it attached. Both facts are printed in the page's readout
-rather than hidden, because they are the things that will need deciding before this model ships in
-the game: it needs clips (or the game's procedural rig), and a GLB pass through the asset pipeline.
-
-To test a different model: drop the `.fbx` and its textures in `src/assets/rebel/`, name them in
-`ASSET` at the top of `src/tester/tester.js`, and rebuild.
 
 ## Checking a build
 

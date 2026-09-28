@@ -252,18 +252,29 @@ function stairRails(bx, bz, axis, dir, width, y0, y1, steps, run, mat) {
         const px = bx + (axis === 'x' ? dir * cu : ox);
         const pz = bz + (axis === 'z' ? dir * cu : oz);
         if (axis === 'z') {
-            deco(0.1, 0.34, len, px, cy, pz, mat, { rotX: -dir * ang, cast: false });
-            deco(0.08, 0.09, len, px, cy + 1.02, pz, mat, { rotX: -dir * ang, cast: false });
+            deco(0.14, 0.42, len, px, cy, pz, mat, { rotX: -dir * ang });
+            deco(0.09, 0.1, len, px, cy + 1.02, pz, mat, { rotX: -dir * ang, cast: false });
         } else {
-            deco(len, 0.34, 0.1, px, cy, pz, mat, { rotZ: dir * ang, cast: false });
-            deco(len, 0.09, 0.08, px, cy + 1.02, pz, mat, { rotZ: dir * ang, cast: false });
+            deco(len, 0.42, 0.14, px, cy, pz, mat, { rotZ: dir * ang });
+            deco(len, 0.1, 0.09, px, cy + 1.02, pz, mat, { rotZ: dir * ang, cast: false });
         }
-        // three posts so the rail does not float
-        for (let i = 1; i <= 3; i++) {
-            const f = i / 4, u = run * steps * f, yy = y0 + (y1 - y0) * f;
+        // Posts every other tread, not three per flight. The fire-station roof
+        // stair is fourteen treads of 0.45 m rise — at three posts it read as a
+        // pair of lines leaning on nothing, which is exactly what it was.
+        for (let i = 1; i < steps; i += 2) {
+            const u = run * (i + 0.5), yy = y0 + rise * i;
             const qx = bx + (axis === 'x' ? dir * u : ox);
             const qz = bz + (axis === 'z' ? dir * u : oz);
-            deco(0.08, 1.0, 0.08, qx, yy + 0.5, qz, mat, { cast: false });
+            deco(0.1, 1.0, 0.1, qx, yy + 0.5, qz, mat, { cast: false });
+        }
+        // A centre stringer under the treads on the long flights, so the run has
+        // something carrying it from below instead of only two side boards.
+        if (steps >= 10) {
+            const mid = (y0 + y1) / 2 - 0.3;
+            const mx = bx + (axis === 'x' ? dir * cu : 0);
+            const mz = bz + (axis === 'z' ? dir * cu : 0);
+            if (axis === 'z') deco(0.12, 0.5, len, mx, mid, mz, mat, { rotX: -dir * ang });
+            else deco(len, 0.5, 0.12, mx, mid, mz, mat, { rotZ: dir * ang });
         }
     }
 }
@@ -293,7 +304,11 @@ function buildHouse(kind) {
     const cx = (x0 + x1) / 2, cz = (z0 + z1) / 2, w = x1 - x0, d = z1 - z0;
 
     // ── foundation + ground floor ──
-    box(w + 0.5, 0.5, d + 0.5, cx, 0.0, cz, mats.concrete, { tag: 'concrete' });
+    // Plinth and floor finished on the same plane (0.25), so the room's floor
+    // z-fought itself: the flicker between white and normal that the town kept
+    // showing. The plinth is 6 cm lower now, and it is the floor box that sets
+    // the walk height, so nothing about traversal changed.
+    box(w + 0.5, 0.5, d + 0.5, cx, -0.06, cz, mats.concrete, { tag: 'concrete' });
     box(w, floor, d, cx, floor / 2, cz, mats.floor, { tag: 'wood' });
     deco(w - 0.3, 0.03, 3.0, cx, floor + 0.015, z1 - 1.7, mats.tile, { cast: false });   // kitchen tile
 
@@ -447,9 +462,11 @@ function buildPorchAndBalcony(mats, kind) {
     // timber deck at ground level
     box(pw, 0.28, pd, pcx, 0.14, pcz, mats.wood, { tag: 'wood' });
     deco(pw, 0.04, 0.1, pcx, 0.3, P.z0 + 0.05, mats.trim, { cast: false });
-    // steps up from the front walk
-    box(0.36, 0.15, 2.4, 15.05, 0.075, -5.8, mats.concrete, { tag: 'step' });
-    box(0.4, 0.28, 2.4, 15.42, 0.14, -5.8, mats.concrete, { tag: 'step' });
+    // steps up from the front walk. The upper one used to finish exactly on the
+    // deck's own plane (0.28), so the two surfaces flickered in the doorway;
+    // each riser now lands a couple of centimetres below the one above it.
+    box(0.36, 0.14, 2.4, 15.05, 0.07, -5.8, mats.concrete, { tag: 'step' });
+    box(0.4, 0.26, 2.4, 15.42, 0.13, -5.8, mats.concrete, { tag: 'step' });
 
     // posts carrying the balcony
     for (const pz of [-8.7, -6.3, -3.4, -1.85]) {
@@ -505,7 +522,12 @@ function buildGarage(mats) {
     const { x0, x1, z0, z1, h, floor } = G;
     const cx = (x0 + x1) / 2, cz = (z0 + z1) / 2, w = x1 - x0, d = z1 - z0;
 
-    box(w + 0.4, 0.3, d + 0.4, cx, 0.0, cz, mats.concrete, { tag: 'concrete' });
+    // The footing and the finished floor used to top out on exactly the same
+    // plane, and two overlapping surfaces at the same depth z-fight: the garage
+    // floor strobed white and normal as the camera moved. The footing sits below
+    // the floor now. Walk height is unchanged — it is the floor box that defines
+    // it, and that box did not move.
+    box(w + 0.4, 0.26, d + 0.4, cx, -0.05, cz, mats.concrete, { tag: 'concrete' });
     box(w, floor, d, cx, floor / 2, cz, mats.concrete, { tag: 'concrete' });
 
     // north side is the house wall; build the other three
@@ -640,7 +662,7 @@ function buildBungalow(kind) {
     const { x0, x1, z0, z1, t, floor, top, ceil, ridge } = BG;
     const cx = (x0 + x1) / 2, cz = (z0 + z1) / 2, w = x1 - x0, d = z1 - z0;
 
-    box(w + 0.5, 0.4, d + 0.5, cx, 0.0, cz, mats.concrete, { tag: 'concrete' });
+    box(w + 0.5, 0.4, d + 0.5, cx, -0.05, cz, mats.concrete, { tag: 'concrete' });
     box(w, floor, d, cx, floor / 2, cz, mats.floor, { tag: 'wood' });
 
     const WIN = { y0: 1.1, y1: 2.3 };
@@ -1258,8 +1280,16 @@ function circleCover() {
     for (const [bx, bz, r] of [[16.5, -16.0, 0.75], [30.0, 9.5, 0.7], [11.5, 15.5, 0.6], [29.5, 14.0, 0.7]]) {
         const geo = new THREE.IcosahedronGeometry(r, 1);
         const pos = geo.attributes.position;
+        // Jitter has to be a function of the CORNER, not of the vertex row.
+        // Polyhedron geometry is non-indexed: a corner shared by five triangles
+        // is stored five times, so rolling a random scale per row moved those
+        // five copies to five different places and tore the surface open. That
+        // is where every bush in the game got its holes.
+        const jit = new Map();
         for (let i = 0; i < pos.count; i++) {
-            const k = 0.84 + Math.random() * 0.30;
+            const key = `${pos.getX(i).toFixed(4)},${pos.getY(i).toFixed(4)},${pos.getZ(i).toFixed(4)}`;
+            let k = jit.get(key);
+            if (k === undefined) { k = 0.84 + Math.random() * 0.30; jit.set(key, k); }
             pos.setXYZ(i, pos.getX(i) * k, pos.getY(i) * k * 0.8, pos.getZ(i) * k);
         }
         geo.computeVertexNormals();
@@ -1677,10 +1707,24 @@ const mirrorXYZ = n => ({ x: -n.x, y: n.y, z: n.z });
  * having spawned outside the map, so the pair moved in to 36.6, where the houses
  * still screen them and the street still owns them.
  */
+// Every point here is a standable waypoint the bots already use, spread over the
+// back yard, the lane between the lots and the bungalow corner — instead of seven
+// in a three-metre strip against the fence. That is what the bigger town is for:
+// you deploy into open ground and walk to the fight, and a teammate cannot spawn
+// inside you.
+// Every point here is a standable waypoint the bots already use, spread over the
+// back yard, the lane between the lots and the bungalow corner — instead of seven
+// in a three-metre strip against the fence. Nothing is within 5 m of its
+// neighbours, because a spawn list people stand on top of each other in is how
+// "the bodies are clumped into my teammates" gets reported. That is what the
+// bigger town is for: you deploy into open ground and walk to the fight.
+// All of them are on raw ground at y = 0 — none on a porch, plinth or paved
+// pad, because a soldier dropped onto a 20 cm step spawns half inside it.
 const SPAWN_EAST = [
-    { x: 37.0, z: -6.0 }, { x: 37.0, z: -2.0 }, { x: 37.0, z: 2.0 },
-    { x: 34.0, z: -9.0 }, { x: 34.0, z: 5.0 },
-    { x: 36.6, z: -4.0 }, { x: 36.6, z: 0.0 }
+    { x: 36.6, z: -4.0 }, { x: 38.4, z: 3.2 }, { x: 33.0, z: 10.5 },
+    { x: 35.0, z: -11.0 }, { x: 30.4, z: 1.2 }, { x: 30.0, z: -16.0 },
+    { x: 21.0, z: -17.5 }, { x: 16.8, z: -13.3 }, { x: 13.4, z: 4.8 },
+    { x: 21.0, z: 12.0 }, { x: 25.0, z: 10.0 }, { x: 28.0, z: 12.0 }, { x: 16.0, z: 10.0 }
 ];
 export const SPAWN_A = atScale(SPAWN_EAST.map(mirrorXZ));   // west team, behind the teal house
 export const SPAWN_B = atScale(SPAWN_EAST.slice());         // east team, behind the yellow house
@@ -1691,7 +1735,10 @@ export const SPAWN_B = atScale(SPAWN_EAST.slice());         // east team, behind
 const RING_NODES = [];
 for (let i = 0; i < 12; i++) {
     const a = (i / 12) * Math.PI * 2;
-    RING_NODES.push({ x: +(Math.cos(a) * 10.4).toFixed(2), z: +(Math.sin(a) * 10.4).toFixed(2) });
+    // 14.8 m rather than the authored 10.4: the ring is where the bots go to look
+    // for a fight, so a circle sized for the old map kept twelve patrol nodes in
+    // the middle of a town with 45% more ground under the fence.
+    RING_NODES.push({ x: +(Math.cos(a) * 14.8).toFixed(2), z: +(Math.sin(a) * 14.8).toFixed(2) });
 }
 
 const AXIS_NODES = [

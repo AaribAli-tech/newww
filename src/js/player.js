@@ -8,6 +8,7 @@ import {
     playGunshot, playDryFire, playReload, playFootstep, playJump, playLand,
     playHurt, playLowHealth, playWeaponSwap
 } from './audio.js';
+import { SOFT_COVER } from './physics.js';
 
 const EYE_STAND = 1.62, EYE_CROUCH = 1.02;
 const MAX_DELTA = 180;                       // px per event — spike guard
@@ -274,7 +275,7 @@ export class Player {
     }
 
     _trace(origin, dir, d, muzzleWorld) {
-        const world = this.cw.raycast(origin, dir, d.range);
+        const world = this.cw.raycast(origin, dir, d.range, SOFT_COVER);
         let wallDist = world ? world.distance : d.range;
 
         // bots: ray vs. three body spheres, nearest wins

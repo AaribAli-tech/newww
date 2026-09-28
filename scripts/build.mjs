@@ -359,11 +359,6 @@ async function build() {
     html = null;
     log(`   index.html (${kb(htmlOut.bytes)})`);
 
-    // The model tester is a separate page with its own bundle; it is built here so
-    // `npm run build` (and therefore a Vercel deploy) always ships a current one.
-    try { const { buildTester } = await import('./build-tester.mjs'); await buildTester({ quiet: OPTS.quiet }); }
-    catch (e) { log('   ! tester build skipped: ' + (e && e.message || e)); }
-
     log('\n 5/5 shell extras');
     const extras = (await buildIcons()).concat(assets);
     const all = [js.name, css.name, ...css.files, htmlOut.file, ...extras.map(e => e.file)];

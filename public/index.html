@@ -5,8 +5,8 @@
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>NUKETOWN</title>
 
-<link rel="stylesheet" href="/css/styles.dbd291fd38.css">
-<link rel="preload" as="script" crossorigin href="/js/game.4262de3e0f.js">
+<link rel="stylesheet" href="/css/styles.dd8c57029c.css">
+<link rel="preload" as="script" crossorigin href="/js/game.4dc5ba1423.js">
 <link rel="preload" as="font" type="font/woff2" crossorigin href="/fonts/rajdhani-400.759a9000e4.woff2">
 <link rel="preload" as="font" type="font/woff2" crossorigin href="/fonts/teko-700.a57552efb2.woff2">
 <link rel="icon" href="/favicon.svg" type="image/svg+xml">
@@ -41,6 +41,10 @@
     <div class="subrule"><i></i><span id="menuModeTag">Team Deathmatch</span><i></i></div>
     <div id="modePickLabel">Select playlist</div>
     <div id="modePick"></div>
+    <!-- Who you are on the board. Free text, stripped and 14 characters. -->
+    <div id="menuName"><span>Callsign</span>
+      <input class="callsignInput" id="nameMenu" type="text" maxlength="14"
+             spellcheck="false" autocomplete="off" autocapitalize="characters" aria-label="Your callsign"></div>
     <!-- How good the other side is. Asked once, then remembered — see #diffGate. -->
     <div id="menuDiff"><span>Difficulty</span><b id="menuDiffVal">Medium</b>
       <button id="btnDiffChange" type="button">change</button></div>
@@ -55,7 +59,12 @@
 <div id="diffGate">
   <div class="card">
     <h2>Choose your fight</h2>
-    <p class="gateSub">How good the enemy soldiers are. You can change it later in Controls.</p>
+    <p class="gateSub">First, who you are. Then, how good the enemy soldiers are. You can change it later in Controls.</p>
+    <div id="gateName" style="margin:0 0 14px">
+      <span>Callsign</span>
+      <input class="callsignInput" id="nameGate" type="text" maxlength="14" placeholder="SOLDIER-01"
+             spellcheck="false" autocomplete="off" autocapitalize="characters" aria-label="Your callsign"></div>
+    <p class="gateSub">You appear to the other seven as <b id="menuNameVal">SOLDIER-01</b>.</p>
     <div class="diffOpts" id="diffGateOpts"></div>
     <button class="gateSkip" id="diffGateSkip" type="button">Just play — Medium</button>
   </div>
@@ -90,7 +99,7 @@
     <div class="rowSet">
       <label>Enemy skill</label>
       <div class="diffSeg" id="diffSeg"></div>
-      <output id="diffOut">They hit what they can see.</output>
+      <output id="diffOut" class="note">They hit what they can see.</output>
     </div>
     <div class="rowSet">
       <label>Quality</label>
@@ -272,6 +281,6 @@
   </div>
 </div>
 
-<script type="module" src="/js/game.4262de3e0f.js"></script>
+<script type="module" src="/js/game.4dc5ba1423.js"></script>
 </body>
 </html>

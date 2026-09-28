@@ -53,17 +53,28 @@ if (!executablePath) {
 }
 
 const browser = await launcher.launch({
-    headless: true,
+    // 'off' means: do not add a --headless flag of your own. An older chromium
+    // only understands the bare switch, and puppeteer's value-qualified form
+    // makes it exit during the handshake, which looks exactly like a game that
+    // failed to boot.
+    headless: process.env.VERIFY_HEADLESS === 'off' ? false : true,
     // software GL in a container renders a frame in tens of ms, so give the
     // protocol calls room to breathe
     protocolTimeout: Number(process.env.VERIFY_PROTOCOL_TIMEOUT || 420000),
     ...(executablePath ? { executablePath } : {}),
-    args: [
-        '--no-sandbox', '--disable-setuid-sandbox', '--disable-dev-shm-usage',
-        '--use-gl=angle', '--use-angle=swiftshader', '--enable-unsafe-swiftshader',
-        '--window-size=1280,720', '--disable-features=TranslateUI',
-        '--autoplay-policy=no-user-gesture-required'
-    ]
+    // A normal desktop Chrome takes the ANGLE/SwiftShader pair below. A chromium
+    // built for serverless (which is what a sandbox without GPU libraries has to
+    // fall back to) wants the legacy flag instead, and with the wrong one the GPU
+    // process dies and the very first goto reports a detached frame — a launch
+    // failure that reads like a bug in the game. So the args are overridable.
+    args: (process.env.VERIFY_CHROME_ARGS
+        ? process.env.VERIFY_CHROME_ARGS.split(/\s+/).filter(Boolean)
+        : [
+            '--use-gl=angle', '--use-angle=swiftshader', '--enable-unsafe-swiftshader',
+            '--window-size=1280,720', '--disable-features=TranslateUI',
+            '--autoplay-policy=no-user-gesture-required'
+        ]
+    ).concat(['--no-sandbox', '--disable-setuid-sandbox', '--disable-dev-shm-usage'])
 });
 
 /**
@@ -123,7 +134,15 @@ async function race(label, fn, ms) {
 }
 
 const net = { wire: 0, cached: 0, cachedReqs: 0, requests: 0, byUrl: new Map() };
-const cdp = await page.createCDPSession();
+// The byte counters come from the CDP Network domain. The session accessor moved
+// between puppeteer versions, and an old chromium may not answer at all, so this
+// whole attachment is optional: the harness measures the game, and says so when
+// it cannot measure the wire.
+let cdp = null;
+try {
+    cdp = page.createCDPSession ? await page.createCDPSession() : await page.target().createCDPSession();
+} catch { cdp = null; }
+if (cdp) {
 await cdp.send('Network.enable');
 const seen = new Map();
 cdp.on('Network.responseReceived', e => {
@@ -140,6 +159,7 @@ cdp.on('Network.loadingFinished', e => {
     if (info.fromCache || info.fromServiceWorker) { net.cached += bytes; net.cachedReqs++; } else net.wire += bytes;
     net.byUrl.set(info.url, { bytes, fromSW: info.fromServiceWorker });
 });
+}
 await page.setViewport({ width: 1280, height: 720, deviceScaleFactor: 1 });
 
 const errors = [];
@@ -469,6 +489,12 @@ const kills = await race('the kill-feedback checks', () => page.evaluate(async (
             const b = BX[id];
             if (b.tag === 'ground' || b.tag === 'bound') continue;
             if (pos.y + 1.6 <= b.minY || pos.y >= b.maxY) continue;
+            // A staircase is built as one solid box per tread, so the next step up
+            // always overlaps whoever is walking into it. That is not a buried
+            // soldier: if the top of the volume is below their head, they are on it
+            // or beside it, which is how stairs are used. Anything that covers the
+            // head still counts, so a spawn dropped inside a stair mass is caught.
+            if (b.tag === 'stairs' && b.maxY - pos.y < 1.6) continue;
             if (pos.x + r <= b.minX || pos.x - r >= b.maxX) continue;
             if (pos.z + r <= b.minZ || pos.z - r >= b.maxZ) continue;
             inside.push(`${who} in ${b.tag}`);
@@ -495,6 +521,47 @@ const kills = await race('the kill-feedback checks', () => page.evaluate(async (
         }
     }
     const fenceDepth = +(fenceZ1 - fenceZ0).toFixed(1);
+    // Two floor surfaces finishing at the same height over the same ground strobe
+    // white as the camera moves — the flicker that got reported inside the houses.
+    // Only the walkable tags are compared, because a wall base meeting a floor at
+    // the same plane is not something anybody can see.
+    const FLOORS = new Set(['concrete', 'wood', 'floor', 'wall', 'roof', 'platform', 'step']);
+    let zFight = 0, worstZ = 0;
+    for (let i = 0; i < BX.length; i++) {
+        const a = BX[i];
+        if (!FLOORS.has(a.tag)) continue;
+        for (let j = i + 1; j < BX.length; j++) {
+            const b = BX[j];
+            if (!FLOORS.has(b.tag)) continue;
+            if (Math.abs(a.maxY - b.maxY) > 0.03) continue;
+            const ox = Math.min(a.maxX, b.maxX) - Math.max(a.minX, b.minX);
+            const oz = Math.min(a.maxZ, b.maxZ) - Math.max(a.minZ, b.minZ);
+            if (ox > 0.6 && oz > 0.6 && ox * oz > 4) { zFight++; worstZ = Math.max(worstZ, ox * oz); }
+        }
+    }
+    // And a jittered foliage mesh is only watertight if every copy of a shared
+    // corner moved the same way: three's polyhedra are non-indexed, so a corner
+    // belongs to five triangles and is stored five times. Randomising per row
+    // tore them apart — the holes in the bushes. A corner appearing in fewer than
+    // three triangles means the surface came unglued.
+    let torn = 0, tornMeshes = 0, smallNonIndexed = 0;
+    G.scene.traverse(o => {
+        const g = o.geometry;
+        if (!g || g.index || !g.attributes || !g.attributes.position) return;
+        const p = g.attributes.position;
+        if (p.count < 12 || p.count > 400 || p.count % 3) return;
+        if (!g.boundingSphere) g.computeBoundingSphere();
+        if (g.boundingSphere.radius > 2.4) return;
+        smallNonIndexed++;
+        const seen = new Map();
+        for (let i = 0; i < p.count; i++) {
+            const k = `${p.getX(i).toFixed(3)},${p.getY(i).toFixed(3)},${p.getZ(i).toFixed(3)}`;
+            seen.set(k, (seen.get(k) || 0) + 1);
+        }
+        let bad = 0;
+        for (const [, c] of seen) if (c < 3) bad++;
+        if (bad) { torn += bad; tornMeshes++; }
+    });
     const far = G.cw.groundHeight(fenceReach - 3, fenceReach * (78 / 84) - 3, 1.2, 0.42, []);
     out.map = {
         width: +(mxx - mnx).toFixed(1), depth: +(mxz - mnz).toFixed(1),
@@ -506,7 +573,70 @@ const kills = await race('the kill-feedback checks', () => page.evaluate(async (
         // uniform scaling means the two axes keep their ratio; anything else is a
         // map that got stretched, which is a different and much uglier thing
         aspect: +((mxz - mnz) / (mxx - mnx)).toFixed(4),
-        buried: inside, groundAtFarCorner: Number.isFinite(far) ? +far.toFixed(2) : 'NaN'
+        buried: inside, groundAtFarCorner: Number.isFinite(far) ? +far.toFixed(2) : 'NaN',
+        zFight, worstZFight: +worstZ.toFixed(1), torn, tornMeshes, smallNonIndexed,
+        spawnGap: (() => {
+            // How close the deploy put teammates to one another, and how far the
+            // two teams stand from each other, in metres of the grown map. Read it
+            // off the deploy itself — by now the bots have set off, and a 0.4 m gap
+            // in the middle of the street is the fight, not a broken spawn table.
+            const atDeploy = (G.gamemode && G.gamemode._deploySpread)
+                || (G.mode && G.mode._deploySpread) || null;
+            if (atDeploy) return {
+                nearest: atDeploy.nearest, widest: atDeploy.widest, atDeploy: true,
+                count: atDeploy.count, mode: atDeploy.mode, via: 'deploy plan'
+            };
+            // Modes that do not run a deploy (Team Deathmatch hands each soldier the
+            // table itself) are measured by the spawn table's own ledger, which the
+            // game keeps for exactly this question.
+            const wave = G.deploySpread && G.deploySpread();
+            if (wave && wave.count > 1) return {
+                nearest: wave.nearest, widest: wave.widest, count: wave.count,
+                mode: 'spawn table', via: 'spawn table'
+            };
+            const pts = [G.player.position, ...G.bots.filter(b => b.alive).map(b => b.position)];
+            let near = Infinity, far2 = 0;
+            for (let i = 0; i < pts.length; i++) for (let j = i + 1; j < pts.length; j++) {
+                const d = Math.hypot(pts[i].x - pts[j].x, pts[i].z - pts[j].z);
+                if (d < near) near = d;
+                if (d > far2) far2 = d;
+            }
+            return { nearest: +near.toFixed(1), widest: +far2.toFixed(1), via: 'live' };
+        })()
+    };
+
+    // A teammate that looks like it has "bodies clumped into it" has two possible
+    // causes, and they are told apart here: a soldier carrying more than one
+    // skinned mesh, or several soldiers posed by the SAME Skeleton object (in
+    // which case the last pose written wins and every body snaps to one frame).
+    // Neither is a share of the GLB file itself — the clones own their bones.
+    const rigRows = [];
+    const seenSkel = new Map();
+    // The player has no body of its own in first person, so it is not part of the
+    // "every soldier carries exactly one skinned mesh" claim.
+    for (const b of G.bots.filter(x => x.alive)) {
+        // The bot owns a rig; the rig owns the object tree. Reading the wrong one
+        // reports zero skinned meshes for every soldier, which is a broken
+        // measurement and not a broken game.
+        const root = (b.rig && b.rig.root) || b.root || b.group || null;
+        let skins = 0, first = null;
+        (function walk(o) {
+            if (!o) return;
+            if (o.isSkinnedMesh) { skins++; if (!first) first = o; }
+            for (const c of o.children || []) walk(c);
+        })(root);
+        const key = first && first.skeleton ? first.skeleton.bones.map(x => x.id).join(',') : 'none';
+        seenSkel.set(key, (seenSkel.get(key) || 0) + 1);
+        rigRows.push({ who: b.name, team: b.team, skins, shared: (seenSkel.get(key) || 0) });
+    }
+    let worstShare = 1;
+    for (const [, n] of seenSkel) if (n > worstShare) worstShare = n;
+    out.rigs = {
+        soldiers: rigRows.length,
+        multiSkin: rigRows.filter(r => r.skins !== 1).map(r => `${r.who}:${r.skins}`),
+        noSkin: rigRows.filter(r => r.skins === 0).map(r => r.who),
+        worstShare,
+        counts: { first: rigRows[0] ? rigRows[0].skins : -1 }
     };
 
     // One gun, in one slot. Everything that could change the weapon gets pressed:
@@ -604,7 +734,20 @@ if (kills.error) {
         ` colliders · step ${kills.map.stepHeight} m · fog ${kills.map.fog} m · far` +
         ` ${kills.map.camFar} · sky dome r${kills.map.skyR} · ground at the far corner` +
         ` ${kills.map.groundAtFarCorner} · nobody buried in a wall: ${kills.map.buried.length === 0}` +
-        (kills.map.buried.length ? ` (${kills.map.buried.slice(0, 3).join(', ')})` : ''));
+        (kills.map.buried.length ? ` (${kills.map.buried.slice(0, 3).join(', ')})` : '') +
+        ` · coplanar floors: ${kills.map.zFight}` +
+        ` · torn foliage corners: ${kills.map.torn} in ${kills.map.tornMeshes}/${kills.map.smallNonIndexed} meshes`);
+    // The gap is only a verdict when it was read off a decision. Measured live it
+    // says the soldiers are fighting, not that the table is broken, so it is
+    // reported and not judged.
+    const roam = kills.map.spawnGap;
+    const roamJudged = roam.via !== 'live';
+    log(` room to roam      ${roam.count || '?'} soldiers placed ${roam.nearest} m apart at their closest · ` +
+        `widest ${roam.widest} m · measured ${roam.via}${roam.mode ? ` in ${roam.mode}` : ''}` +
+        ` · nobody within 4 m of a mate: ${roamJudged ? roam.nearest > 4 : 'not judged'}`);
+    log(` soldier rigs      ${kills.rigs.soldiers} soldiers, one skinned mesh each:` +
+        ` ${kills.rigs.multiSkin.length === 0 && kills.rigs.noSkin.length === 0 ? 'yes' : 'NO — ' + [...kills.rigs.multiSkin, ...kills.rigs.noSkin].join(', ')}` +
+        ` · most soldiers sharing one skeleton: ${kills.rigs.worstShare}`);
     log(` one gun / one slot  loadout ${kills.gun.loadout} · locked: ${kills.gun.noSwap} · 1-4 + Q + wheel` +
         ` ${kills.gun.keysIgnored ? 'ignored' : 'CHANGED THE GUN'} · gun #${kills.gun.other}` +
         ` out of reach: ${kills.gun.otherRefused} · slots on screen: ${kills.gun.liveSlots}` +
@@ -639,6 +782,10 @@ const killsOk = !kills.error &&
     kills.map.stepHeight > 0.55 && kills.map.buried.length === 0 &&
     Number.isFinite(kills.map.groundAtFarCorner) &&
     kills.map.skyR === 400 && kills.map.camFar > kills.map.fogFar &&
+    kills.map.zFight === 0 && kills.map.torn === 0 &&
+    kills.rigs.multiSkin.length === 0 && kills.rigs.noSkin.length === 0 && kills.rigs.worstShare === 1 &&
+    (kills.map.spawnGap.via === 'live' || kills.map.spawnGap.nearest > 4) &&
+    kills.map.spawnGap.widest > 60 &&
     kills.gun.noSwap === true && kills.gun.keysIgnored === true &&
     kills.gun.otherRefused === true && kills.gun.liveSlots === 1 &&
     kills.gun.labelMatchesMode === true &&

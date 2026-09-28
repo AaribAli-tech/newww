@@ -6,7 +6,7 @@ import { buildNuketown, SPAWN_A, SPAWN_B, MAP_BOUNDS } from './map.js';
 import { CollisionWorld } from './physics.js';
 import { ViewModel } from './viewmodel.js';
 import { Player } from './player.js';
-import { Bot } from './ai.js';
+import { Bot, claimPoint, deploySpread, resetDeploySpread } from './ai.js';
 import { HUD } from './hud.js';
 import { loadRebel, rebelInfo, setRebelMode } from './rebel.js';
 import { Effects } from './effects.js';
@@ -92,7 +92,7 @@ const QUALITY = [
 // a few seconds on any machine with headroom to spare.
 // `difficulty: null` is the state "never asked yet" — the first Deploy screen
 // answers it and it is saved from then on.
-const DEFAULTS = { sens: 1.0, fov: 78, quality: 0, difficulty: null };
+const DEFAULTS = { sens: 1.0, fov: 78, quality: 0, difficulty: null, name: '' };
 let settings = { ...DEFAULTS };
 
 function loadSettings() {
@@ -109,6 +109,59 @@ function saveSettings() {
 }
 
 const diffEntry = () => difficultyById(settings.difficulty || DEFAULT_DIFFICULTY);
+
+// ── callsign ────────────────────────────────────────────────────────────────
+/**
+ * Stripped, not trusted: this string lands inside innerHTML in the scoreboard
+ * and the kill feed, so anything that is not a letter, a digit or one of
+ * " ._-" is dropped before it is stored. 14 characters, because the row is a
+ * fixed width and a long name pushes the kill counts off the board.
+ */
+function cleanCallsign(raw) {
+    const t = String(raw == null ? '' : raw).replace(/[^\p{L}\p{N} ._\-]/gu, '').trim().slice(0, 14);
+    return t || 'SOLDIER-01';
+}
+const callsign = () => cleanCallsign(settings.name);
+
+/** One write for the whole UI: profile, player, bots' view of the player, and
+ *  every field showing it. The name is what the scoreboard and the feed print. */
+function applyCallsign(raw) {
+    const name = cleanCallsign(raw);
+    settings.name = name;
+    saveSettings();
+    if (player) player.name = name;
+    if (playerProxy) playerProxy.name = name;
+    for (const el of document.querySelectorAll('.callsignInput')) {
+        if (document.activeElement !== el) el.value = name;
+    }
+    const chip = $('menuNameVal');
+    if (chip) chip.textContent = name;
+}
+
+function buildNameUI() {
+    const fields = document.querySelectorAll('.callsignInput');
+    for (const el of fields) {
+        el.value = settings.name || '';
+        el.placeholder = callsign();
+        el.maxLength = 14;
+        // Typing is not gameplay. The field swallows the keystroke before it
+        // reaches the window listeners, so WASD does not move a soldier and
+        // Enter does not fire a weapon while someone is writing their name.
+        el.addEventListener('keydown', e => {
+            e.stopPropagation();
+            if (e.code === 'Enter' || e.code === 'Escape') { e.preventDefault(); el.blur(); }
+        });
+        el.addEventListener('keyup', e => e.stopPropagation());
+        el.addEventListener('input', () => {
+            settings.name = cleanCallsign(el.value);
+            if (player) player.name = settings.name;
+            if (playerProxy) playerProxy.name = settings.name;
+            const chip = $('menuNameVal');
+            if (chip) chip.textContent = settings.name;
+        });
+        el.addEventListener('blur', () => applyCallsign(el.value));
+    }
+}
 
 const _v = new THREE.Vector3();
 
@@ -232,6 +285,29 @@ function warmShaders() {
 function grabPointer() {
     const r = canvas.requestPointerLock();
     if (r && typeof r.catch === 'function') r.catch(() => { /* user can click to re-lock */ });
+    document.body.classList.add('playing');
+}
+
+/** True while a screen you are meant to click is on top of the game. */
+function menuOpen() {
+    const m = $('menu');
+    if (m && m.style.display !== 'none') return true;
+    // The Controls / settings card can be opened over a live match, and a slider
+    // you cannot see the pointer of is not a slider.
+    const pn = $('panel');
+    if (pn && pn.style.display === 'flex') return true;
+    return ['pause', 'end', 'diffGate'].some(id => { const n = $(id); return !!n && n.classList.contains('on'); });
+}
+
+/**
+ * The mouse belongs to the menus, never to the game's overlay screens. Releasing
+ * pointer lock is asynchronous and does nothing at all if nothing is locked, so
+ * the class that hides the system cursor is dropped here as well: without it the
+ * arrow stayed invisible over the main menu and the pause card.
+ */
+function releaseCursor() {
+    if (document.pointerLockElement) document.exitPointerLock();
+    document.body.classList.remove('playing');
 }
 
 function setupRenderer() {
@@ -283,7 +359,14 @@ function setupRenderer() {
 // than about this round. Controls carries the same three choices for afterwards,
 // and picking one re-scales the soldiers already on the map — there is no reason
 // to make someone quit a match to try Hard.
-function showDiffGate() { const g = $('diffGate'); if (g) g.classList.add('on'); document.exitPointerLock(); }
+function showDiffGate() {
+    const g = $('diffGate'); if (g) g.classList.add('on');
+    releaseCursor();
+    // Focus it only while it is still blank: a returning player has a name, and
+    // stealing their caret (or an automated test's keystrokes) is not the point.
+    const f = settings.name ? null : document.querySelector('#diffGate .callsignInput');
+    if (f) f.focus();
+}
 function hideDiffGate() { const g = $('diffGate'); if (g) g.classList.remove('on'); }
 const diffGateOpen = () => { const g = $('diffGate'); return !!g && g.classList.contains('on'); };
 
@@ -332,6 +415,8 @@ function buildDifficultyUI() {
     const change = $('btnDiffChange');
     if (change) change.onclick = showDiffGate;
     paintDifficulty();
+    buildNameUI();
+    applyCallsign(settings.name);        // paints the chip and the fields
 }
 
 function setupWorld() {
@@ -429,6 +514,10 @@ function setupPost() {
     composerFX = createPostFX(renderer, scene, camera, vm);
     warmShaders();
     loadSettings();
+    // The player object exists before the profile is read, so its name is set
+    // from here as well — otherwise the scoreboard says "You" once, at the very
+    // first match, whatever you typed.
+    applyCallsign(settings.name);
     applyQuality();
     if (player) {
         player.sensitivity = 0.0016 * settings.sens;
@@ -465,6 +554,8 @@ function finishBoot() {
          * rasteriser. `registerKill` is the same function a hit calls.
          */
         debugKill: (head = false, name = 'TEST') => registerKill({ name: name || 'TEST' }, 'M4A1', !!head, false),
+        /** The last wave of spawn-table placements, as the game decided it. */
+        deploySpread: () => deploySpread(),
         // one frame of the free-roam camera, callable without rendering —
         // scripts/verify.mjs asserts on what it does
         get roamTicks() { return roamTicks; },
@@ -597,13 +688,15 @@ function bindUI() {
     };
 
     canvas.addEventListener('click', () => {
-        if (state === 'playing' && !document.pointerLockElement) grabPointer();
+        // A click that lands on the canvas through a menu is the menu being
+        // clicked, not the player asking for the mouse back.
+        if (state === 'playing' && !menuOpen() && !document.pointerLockElement) grabPointer();
     });
     document.addEventListener('pointerlockchange', () => {
         const locked = document.pointerLockElement === canvas;
         if (player) player.locked = locked;
-        document.body.classList.toggle('playing', locked);
-        if (!locked && state === 'playing' && player.alive) pause(true);
+        document.body.classList.toggle('playing', locked && !menuOpen());
+        if (!locked && state === 'playing' && player.alive && !menuOpen()) pause(true);
     });
     window.addEventListener('keydown', e => {
         if (e.code === 'Escape') {
@@ -771,6 +864,8 @@ function applyQuality() {
 
 // ── match flow ──────────────────────────────────────────────────────────────
 function startMatch() {
+    // A fresh match is a fresh deal of the spawn table.
+    resetDeploySpread();
     // Starting a match from the keyboard while the ask is still up (Enter reaches
     // Deploy) is an answer too: it means Medium, and it is remembered, so the
     // gate does not come back next visit to ask a question that was answered.
@@ -843,7 +938,9 @@ function startMatch() {
     // The hitscan rule has to match the bots' (ai.js isHostile) or the two sides
     // disagree about who is fair game; the mode owns that answer.
     player.allHostile = asEnemy;
-    player.respawn(randElement(SPAWN_A));
+    // Claimed, not just chosen: the spawn table must know a live player is
+    // standing on this one, or the next bot it hands out lands at your feet.
+    player.respawn(claimPoint(randElement(SPAWN_A), TEAM_A, 3));
     player.sensitivity = 0.0016 * settings.sens;
     player.baseFov = settings.fov;
     player.paused = false;
@@ -871,8 +968,15 @@ function toMenu() {
     hud.hideEnd();
     $('pause').classList.remove('on');
     $('menu').style.display = 'flex';
-    document.exitPointerLock();
+    releaseCursor();
     player.paused = true;
+    // The streaks own things that outlive a match unless they are told to stop:
+    // the nuke whiteout and bloom are graded every frame from streak state, the
+    // countdown overlay is only ever cleared by the flash that follows it, and
+    // the UAV keeps orbiting the town. Quitting mid-nuke used to leave the menu
+    // behind a white fog with "5" in the middle of it.
+    if (streaks) streaks.reset();
+    if (hud.abortNuke) hud.abortNuke();
 }
 
 function pause(on) {
@@ -880,7 +984,7 @@ function pause(on) {
     state = on ? 'paused' : 'playing';
     player.paused = on;
     $('pause').classList.toggle('on', on);
-    if (on) document.exitPointerLock();
+    if (on) releaseCursor();
     else grabPointer();
 }
 
@@ -888,7 +992,9 @@ function endMatch() {
     if (state === 'ended') return;
     state = 'ended';
     player.paused = true;
-    document.exitPointerLock();
+    releaseCursor();
+    if (streaks) streaks.reset();
+    if (hud.abortNuke) hud.abortNuke();
     hud.hideDeath();
     // The result card is the end of the flight: give the camera back so the frozen
     // last frame is the game's own view, and so nothing keeps integrating movement
@@ -923,7 +1029,7 @@ function registerKill(bot, weaponLabel, head, fromStreak) {
     // a gun and in Free For All you could never reach 200. Modes decide what a
     // kill is worth; main just reports it.
     gamemode.onKill(player, bot, player.def || { short: weaponLabel, name: weaponLabel }, head);
-    hud.killfeed('You', bot.name, weaponLabel, true, head);
+    hud.killfeed(player.name || callsign(), bot.name, weaponLabel, true, head);
 
     // The stack over the crosshair says what the kill was; the feed on the right
     // says who it was. A reward that came off a streak (nukes, airstrikes) still
@@ -1018,7 +1124,7 @@ function handleBotEvents(bot, events) {
                 if (!player.alive) {
                     gamemode.onKill(bot, playerProxy, bot.weapon, e.head);
                     bot.kills++; bot.killStreak++; bot.score += 100;
-                    hud.killfeed(bot.name, 'You', bot.weapon.short, false, e.head);
+                    hud.killfeed(bot.name, player.name || callsign(), bot.weapon.short, false, e.head);
                     deadInfo = { by: bot.name, weapon: bot.weapon.name };
                     hud.showDeath(bot.name, bot.weapon.name);
                 }
@@ -1087,7 +1193,7 @@ function updateFreeRoam(dt = 0.016) {
 // A lightweight stand-in so bots can treat the player like any other entity.
 const playerProxy = {
     position: new THREE.Vector3(), alive: true, team: TEAM_A, isCrouching: false,
-    name: 'You', spawnProtect: 0,
+    name: callsign(), spawnProtect: 0,
     takeDamage() { return false; }
 };
 
@@ -1224,11 +1330,15 @@ function loop(ts) {
     // grade uniforms
     const g = composerFX.grade.uniforms;
     g.time.value = elapsed;
-    g.damage.value = clamp((1 - player.health / 100) * 0.5, 0, 0.5) * (player.alive ? 1 : 0);
-    g.death.value = player.deathProgress * 0.82;
-    g.whiteout.value = streaks.nukeFired
+    // The grade is match state. Left running on the menu it holds the last frame
+    // of the fight — the nuke wash, the red of low health, the death fade — over
+    // everything you then try to read.
+    const graded = state === 'playing' || state === 'paused';
+    g.damage.value = graded ? clamp((1 - player.health / 100) * 0.5, 0, 0.5) * (player.alive ? 1 : 0) : 0;
+    g.death.value = graded ? player.deathProgress * 0.82 : 0;
+    g.whiteout.value = graded && streaks.nukeFired
         ? clamp(1 - (streaks.nukeT - 5.0) / 2.2, 0, 1) : 0;
-    composerFX.bloom.strength = 0.34 + (streaks.nukeFired ? 1.4 : 0) * g.whiteout.value;
+    composerFX.bloom.strength = 0.34 + (graded && streaks.nukeFired ? 1.4 : 0) * g.whiteout.value;
 
     // live fps readout — settings panel and the on-screen perf strip
     fpsAccum += dt; fpsFrames++;
@@ -1265,7 +1375,7 @@ function pickSafeSpawn() {
         }
         if (nearest > bestD) { bestD = nearest; best = s; }
     }
-    return best;
+    return claimPoint(best, TEAM_A, 3);
 }
 
 void MAP_BOUNDS; void SPAWN_B; void WEAPON_DEFS; void TEAM_B;

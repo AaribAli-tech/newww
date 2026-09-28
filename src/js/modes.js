@@ -63,11 +63,42 @@ const ROUND_TIME = 90.0 * MAP_SCALE;
 const ROUND_HOLD = 3.5;        // beat between the last kill and the next round
 const ROUNDS_TO_WIN = 3;       // best of five
 
-function spawnPoint(team, i) {
+/** The list a team draws from. Two lines, in case a build ships without them. */
+function spawnList(team) {
     const list = team === TEAM_B
         ? (SPAWN_B && SPAWN_B.length ? SPAWN_B : FALLBACK_B)
         : (SPAWN_A && SPAWN_A.length ? SPAWN_A : FALLBACK_A);
-    return list[i % list.length];
+    return list;
+}
+
+function spawnPoint(team, i) {
+    return spawnList(team)[i % spawnList(team).length];
+}
+
+/**
+ * The candidate that sits furthest from every position already taken this round.
+ *
+ * Taking the list in order was fine at 84 × 78 m and is wrong now: seven slots in
+ * a three-metre strip put a whole team shoulder to shoulder in the same doorway,
+ * so a 45% bigger town played exactly like the small one. Spreading the picks
+ * instead is what makes the extra ground mean something — the fight starts later
+ * and across more of the map, and nobody materialises inside a teammate.
+ */
+function farthestSpawn(team, taken, startAt = 0) {
+    const list = spawnList(team);
+    if (!taken || !taken.length) return list[startAt % list.length];
+    let best = list[startAt % list.length], bestD = -1;
+    for (let n = 0; n < list.length; n++) {
+        const c = list[(startAt + n) % list.length];
+        let d = Infinity;
+        for (const t of taken) {
+            const dx = c.x - t.x, dz = c.z - t.z;
+            const dd = dx * dx + dz * dz;
+            if (dd < d) d = dd;
+        }
+        if (d > bestD) { bestD = d; best = c; }
+    }
+    return best;
 }
 
 // ── base ────────────────────────────────────────────────────────────────────
@@ -411,9 +442,17 @@ class RoundControl extends BaseMode {
     /** Revive and reposition every entity for a fresh round. */
     _deploy() {
         const p = this.player;
+        // Every position this deploy hands out, in the order it hands them out.
+        // The only honest record of the spread: by the time anything looks at the
+        // soldiers they have started walking, and a 1.5 m gap in the middle of the
+        // street is the fight, not a broken spawn table.
+        // Measured off the soldiers after they were put down, not off the table,
+        // because the ring offset each one lands on is part of the answer.
+        const placed = [];
         if (p) {
             const sp = spawnPoint(TEAM_A, 0);
             if (p.respawn) p.respawn(sp);
+            placed.push({ x: p.position.x, z: p.position.z });
             this._playerAnchor.x = p.position.x;
             this._playerAnchor.z = p.position.z;
             p.killStreak = 0;
@@ -422,13 +461,21 @@ class RoundControl extends BaseMode {
         }
 
         const bots = this.bots();
-        let ia = 1, ib = 0;                  // slot 0 on A belongs to the player
+        // Slot 0 on A belongs to the player, and the rest of the team is placed
+        // away from everyone already deployed rather than in list order.
+        const takenA = [this._playerAnchor.x === undefined ? null : this._playerAnchor].filter(Boolean);
+        const takenB = [];
+        let ia = 1, ib = 0;
         for (let i = 0; i < bots.length; i++) {
             const b = bots[i];
             if (!b) continue;
-            const sp = spawnPoint(b.team, b.team === TEAM_B ? ib++ : ia++);
+            const onA = b.team !== TEAM_B;
+            const sp = farthestSpawn(onA ? TEAM_A : TEAM_B, onA ? takenA : takenB, (onA ? ia : ib));
+            if (onA) takenA.push(sp); else takenB.push(sp);
+            ia++; ib++;
             b.respawnTimer = 0;
             if (b.spawn) b.spawn(sp);
+            placed.push({ x: b.position.x, z: b.position.z });
             this._giveWeapon(b);
             b._modeAlive = true;
             b.killStreak = 0;
@@ -437,6 +484,22 @@ class RoundControl extends BaseMode {
             b._ctlAnchor.z = b.position.z;
         }
         this._deployed = bots.length;
+        // How much room the deploy actually bought, recorded at the moment it was
+        // decided. The live positions cannot answer this a few seconds later: by
+        // then everyone has started walking, which is the point of the mode.
+        let nearest = Infinity, widest = 0;
+        for (let i = 0; i < placed.length; i++) {
+            for (let j = i + 1; j < placed.length; j++) {
+                const d = Math.hypot(placed[i].x - placed[j].x, placed[i].z - placed[j].z);
+                if (d < nearest) nearest = d;
+                if (d > widest) widest = d;
+            }
+        }
+        if (!Number.isFinite(nearest)) nearest = 0;
+        this._deploySpread = {
+            nearest: +nearest.toFixed(1), widest: +widest.toFixed(1),
+            count: placed.length, mode: this.id
+        };
     }
 
     /**
@@ -583,7 +646,7 @@ class FreeForAll extends BaseMode {
         const rows = [];
         for (const e of this.entities()) {
             rows.push({
-                name: this.isPlayer(e) ? 'You' : e.name,
+                name: e.name || 'You',
                 k: e.kills | 0, d: e.deaths | 0, s: e.score | 0,
                 me: this.isPlayer(e),
                 tag: `${Math.min(e.kills | 0, this.target)}/${this.target}`
@@ -789,7 +852,7 @@ class GunGame extends BaseMode {
             const rung = Math.min(e._ggRung | 0, this.rungs - 1);
             const d = DEFS[LADDER[rung]];
             rows.push({
-                name: this.isPlayer(e) ? 'You' : e.name,
+                name: e.name || 'You',
                 k: e.kills | 0, d: e.deaths | 0, s: e.score | 0,
                 me: this.isPlayer(e),
                 // Kills first, gun second: once the ladder wraps, the gun says

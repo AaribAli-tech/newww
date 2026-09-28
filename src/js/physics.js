@@ -2,12 +2,24 @@
 // physics.js — AABB collision world with a uniform-grid broadphase.
 //
 // Everything (movement, bullets, line-of-sight) resolves against the same set
-// of axis-aligned boxes, so what you can walk into is exactly what you can
-// shoot into.  No mesh raycasting: it is both slower and inconsistent.
+// of axis-aligned boxes, so what you can walk into is what you can shoot into —
+// except for the foliage in SOFT_COVER, which stops legs and not bullets.
+// No mesh raycasting: it is both slower and inconsistent.
 // ============================================================================
 import * as THREE from 'three';
 
 const CELL = 6;
+
+/**
+ * Tags that never stop a bullet or a sightline. Foliage is the case that
+ * mattered: a shrub or hedge carries a solid collider so you cannot walk
+ * through it, but it is not a wall. The AI's aim test and the player's hitscan
+ * both consulted it, so an enemy tucked behind a bush could see out and shoot
+ * while nobody could shoot back. Routing both through this one set makes cover
+ * symmetric and leaves every wall alone; movement still treats a hedge as a
+ * wall, because that is what the player's legs expect.
+ */
+export const SOFT_COVER = new Set(['bush']);
 
 export class CollisionWorld {
     constructor() {
@@ -154,8 +166,13 @@ export class CollisionWorld {
     }
 
     // ── ray casting (slab method) ───────────────────────────────────────────
-    /** @returns {null | {distance, point, normal}} */
-    raycast(origin, dir, maxDist = 200) {
+    /**
+     * @param {Set<string>|null} skipTags tags that do not stop this ray. Passing
+     *   SOFT_COVER is the bullet/sightline rule; passing nothing is the movement
+     *   rule, where a hedge is a wall you have to walk around.
+     * @returns {null | {distance, point, normal}}
+     */
+    raycast(origin, dir, maxDist = 200, skipTags = null) {
         // walk the ray's XZ footprint through the grid cells it touches
         const scratch = this._rayScratch || (this._rayScratch = []);
         const ex = origin.x + dir.x * maxDist, ez = origin.z + dir.z * maxDist;
@@ -169,6 +186,7 @@ export class CollisionWorld {
 
         for (let i = 0; i < ids.length; i++) {
             const b = this.boxes[ids[i]];
+            if (skipTags && skipTags.has(b.tag)) continue;
             let t1 = (b.minX - origin.x) * invX, t2 = (b.maxX - origin.x) * invX;
             let tmin = Math.min(t1, t2), tmax = Math.max(t1, t2);
             let axis = 0;
@@ -197,12 +215,12 @@ export class CollisionWorld {
         return { distance: hit.t, point, normal, tag: hit.box.tag };
     }
 
-    isLineOfSight(from, to) {
+    isLineOfSight(from, to, skipTags = SOFT_COVER) {
         const dx = to.x - from.x, dy = to.y - from.y, dz = to.z - from.z;
         const dist = Math.sqrt(dx * dx + dy * dy + dz * dz);
         if (dist < 0.15) return true;
         const dir = _tmpDir.set(dx / dist, dy / dist, dz / dist);
-        const hit = this.raycast(from, dir, dist - 0.12);
+        const hit = this.raycast(from, dir, dist - 0.12, skipTags);
         return !hit;
     }
 }

@@ -830,6 +830,18 @@ export class HUD {
         this.flash(1, 2600);
     }
 
+    /**
+     * Take the nuke overlay away without playing its flash. Leaving a match part
+     * way through a countdown used to strand the screen on the main menu, since
+     * only the flash at the end of the sequence ever hid it.
+     */
+    abortNuke() {
+        if (this.el.nukeSeq) this.el.nukeSeq.classList.remove('on');
+        txt(this.el.nukeCount, '');
+        if (this.el.ntTrack) this.el.ntTrack.classList.remove('ready');
+        if (this.el.ntBar) this.el.ntBar.style.width = '0%';
+    }
+
     // ── overlays ────────────────────────────────────────────────────────────
     showDeath(by, weapon) {
         // re-trigger the entry animation on every death
@@ -938,7 +950,7 @@ export class HUD {
             }
             host.innerHTML = html;
         };
-        const a = [{ name: 'You', k: player.kills, d: player.deaths, a: player.assists, s: player.score, me: true }];
+        const a = [{ name: player.name || 'You', k: player.kills, d: player.deaths, a: player.assists, s: player.score, me: true }];
         const b = [];
         for (const bot of bots) {
             const e = { name: bot.name, k: bot.kills, d: bot.deaths, a: bot.assists, s: bot.score };

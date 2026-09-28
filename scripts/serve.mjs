@@ -50,7 +50,7 @@ const MIME = {
 function cacheFor(ext, rel) {
     if (rel === 'sw.js') return 'no-cache, no-store, must-revalidate';
     // Every HTML page, not just the root one. The bundles a page loads are named
-    // by content hash, so a week-old /tester/index.html would ask for a file the
+    // by content hash, so a week-old index.html would ask for a file the
     // last build deleted and paint nothing but a blank screen.
     if (ext === '.html') return 'public, max-age=0, must-revalidate';
     if (rel === 'manifest.webmanifest') return 'public, max-age=3600, must-revalidate';
@@ -74,11 +74,10 @@ async function resolveFile(urlPath) {
     if (!full.startsWith(SITE + path.sep) && full !== SITE) return null;
     const st = await fs.stat(full).catch(() => null);
     if (st && st.isFile()) return { rel, full, size: st.size, mtimeMs: st.mtimeMs };
-    // a folder serves its index.html, which is what Vercel does too — this is how
-    // /tester/ (the model sandbox page) resolves.
+    // a folder serves its index.html, which is what Vercel does too.
     if (st && st.isDirectory()) {
         // Redirect, do not serve: a page with relative asset paths resolves them
-        // against the URL it was reached at, so /tester must become /tester/.
+        // against the URL it was reached at, so /docs must become /docs/.
         if (!rel.endsWith('/')) return { redirect: rel.replace(/\/+$/, '') + '/' };
         const idx = path.join(full, 'index.html');
         const st3 = await fs.stat(idx).catch(() => null);

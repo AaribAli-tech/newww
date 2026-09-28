@@ -75,6 +75,12 @@
 
 :root{
   --accent:#FF7A18;
+  /* One orange is the point. Amber is the site's own warning colour, so it marks
+     the thing you are meant to press or the thing you have selected — and nothing
+     else. The rest of the chrome is steel and graphite, like the fencing and the
+     painted curbs out there. */
+  --steel:#9FB2C0;
+  --graphite:#161A20;
   --blue:#4FA8FF;
   --red:#FF4D4D;
   --ink:rgba(255,255,255,0.92);
@@ -142,18 +148,33 @@ canvas#gameCanvas{display:block;width:100vw;height:100vh}
 .mode.on .ds{color:rgba(255,255,255,.6)}
 
 .menuBtn{
-  position:relative;background:rgba(255,255,255,.03);border:1px solid rgba(255,255,255,.18);
-  color:var(--ink);font-family:'Teko',sans-serif;font-size:26px;font-weight:500;
+  position:relative;background:linear-gradient(180deg,rgba(159,178,192,.10),rgba(0,0,0,.28)),var(--graphite);
+  border:1px solid rgba(159,178,192,.24);border-left:2px solid rgba(159,178,192,.5);
+  color:#E6ECF1;font-family:'Teko',sans-serif;font-size:26px;font-weight:500;
   padding:10px 78px;margin:5px;cursor:pointer;letter-spacing:.32em;text-transform:uppercase;
   transition:background .16s,border-color .16s,color .16s,letter-spacing .16s;
 }
-.menuBtn:hover{background:rgba(255,122,24,.16);border-color:var(--accent);color:#fff;letter-spacing:.38em}
-.menuBtn.primary{border-color:rgba(255,122,24,.7);color:var(--accent)}
-.menuBtn.primary:hover{background:var(--accent);color:#101010}
-#menuDiff{display:flex;align-items:center;gap:10px;margin:2px 0 16px;
+.menuBtn:hover{background:linear-gradient(180deg,rgba(255,122,24,.16),rgba(0,0,0,.28)),var(--graphite);
+  border-color:rgba(255,122,24,.55);border-left-color:var(--accent);color:#fff;letter-spacing:.38em}
+/* The one filled button on any screen is the one that costs you something. */
+.menuBtn.primary{background:linear-gradient(180deg,#FF8A33,var(--accent));border:1px solid #FFB072;
+  border-left-color:#FFD2A8;color:#14100C;font-weight:600;box-shadow:0 6px 22px rgba(255,122,24,.22)}
+.menuBtn.primary:hover{background:linear-gradient(180deg,#FF9B4D,#FF8322);color:#14100C;letter-spacing:.36em}
+/* Quit is not a mode of play; it reads as the destructive one without shouting. */
+#btnQuit{color:#F0B7B7;border-left-color:rgba(255,77,77,.55)}
+#btnQuit:hover{background:linear-gradient(180deg,rgba(255,77,77,.18),rgba(0,0,0,.28)),var(--graphite);
+  border-color:rgba(255,77,77,.5);border-left-color:#FF4D4D}
+#menuDiff,#menuName,#gateName{display:flex;align-items:center;gap:10px;margin:2px 0 16px;
   font-family:'Barlow Condensed',sans-serif;font-size:12px;letter-spacing:.3em;
   color:rgba(255,255,255,.45);text-transform:uppercase}
-#menuDiff b{color:var(--accent);font-size:14px;letter-spacing:.22em}
+#menuDiff b,#menuName b,#gateName b{color:var(--accent);font-size:14px;letter-spacing:.22em}
+#menuName input,#gateName input,.callsignInput{flex:1;min-width:0;background:rgba(255,255,255,.05);
+  border:1px solid rgba(159,178,192,.24);border-left:2px solid var(--accent);color:#fff;
+  font-family:'Barlow Condensed',sans-serif;font-size:18px;letter-spacing:.16em;
+  text-transform:uppercase;padding:6px 10px;outline:none;transition:border-color .14s,background .14s}
+#menuName input:focus,#gateName input:focus,.callsignInput:focus{border-color:rgba(255,122,24,.6);background:rgba(255,122,24,.07)}
+#menuName input::placeholder,#gateName input::placeholder,.callsignInput::placeholder{color:rgba(255,255,255,.26)}
+#menuName span{min-width:74px}
 #menuDiff button{background:none;border:0;border-bottom:1px solid rgba(255,255,255,.2);
   color:rgba(255,255,255,.5);font:inherit;letter-spacing:.2em;text-transform:uppercase;
   cursor:pointer;padding:0 0 1px}
@@ -198,14 +219,21 @@ canvas#gameCanvas{display:block;width:100vw;height:100vh}
 .kv{display:flex;justify-content:space-between;padding:7px 0;border-bottom:1px solid rgba(255,255,255,.06);
   font-size:15px;color:rgba(255,255,255,.75);letter-spacing:1px}
 .kv b{color:#fff;font-weight:600;font-family:'Barlow Condensed',sans-serif;letter-spacing:2px}
-.rowSet{display:flex;align-items:center;gap:14px;padding:12px 0}
+.rowSet{display:flex;align-items:center;gap:14px;padding:12px 0;flex-wrap:wrap}
+/* Two things were folding here: the label shrank to fit the row, and the note
+   beside "Enemy skill" is a sentence that was being typeset inside a 62 px
+   column — one word per line, all the way down. Labels hold their line, numbers
+   keep their width, and a note takes the whole next line like the sentence it is. */
 .rowSet label{font-size:14px;letter-spacing:2px;color:rgba(255,255,255,.6);
-  text-transform:uppercase;width:150px}
+  text-transform:uppercase;width:150px;flex:0 0 150px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
 .rowSet input[type=range]{flex:1;accent-color:var(--accent)}
 .rowSet select{flex:1;background:rgba(255,255,255,.06);color:#fff;border:1px solid rgba(255,255,255,.2);
   padding:6px 8px;font-family:'Rajdhani',sans-serif;font-size:14px;letter-spacing:1px;outline:none}
 .rowSet select option{background:#12151a;color:#fff}
-.rowSet output{width:62px;text-align:right;font-family:'Teko',sans-serif;font-size:20px;color:#fff}
+.rowSet output{width:62px;min-width:62px;text-align:right;font-family:'Teko',sans-serif;font-size:20px;color:#fff}
+.rowSet output.note{flex:1 1 100%;width:auto;min-width:0;text-align:left;font-family:'Barlow Condensed',sans-serif;
+  font-size:15px;letter-spacing:.06em;text-transform:none;color:rgba(255,255,255,.5);line-height:1.35}
+.rowSet .diffSeg{flex:1 1 240px}
 
 /* ══════════════════════ HUD ══════════════════════ */
 #hud{position:fixed;inset:0;z-index:100;pointer-events:none;display:none;opacity:0;transition:opacity .3s}

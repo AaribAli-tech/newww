@@ -11,7 +11,7 @@
 import { KillChain, milestoneFor, nextMilestone, milestoneProgress, CHAIN_WINDOW } from '../src/js/medals.js';
 import { MODES, createMode } from '../src/js/modes.js';
 import { GUN_GAME_LADDER, WEAPON_DEFS } from '../src/js/weapons.js';
-import { SPAWN_A, SPAWN_B } from '../src/js/map.js';
+import { SPAWN_A, SPAWN_B, WAYPOINTS } from '../src/js/map.js';
 import { TEAM_A, TEAM_B } from '../src/js/utils.js';
 import { readFile } from 'node:fs/promises';
 import { existsSync } from 'node:fs';
@@ -98,8 +98,11 @@ group('ai.js — hostility');
     };
     ok('a non-finite transform is detected', Bot.prototype.needsHeal.call(healable) === true);
     Bot.prototype.selfHeal.call(healable);
+    // Back near the point, not exactly on it: every soldier takes a place on the
+    // ring around its spawn, so a repaired one cannot land inside a healthy one.
     ok('and repaired: back on the map, aiming at nothing',
-        healable.position.x === -11 && healable.velocity.x === 0
+        Math.hypot(healable.position.x + 11, healable.position.z - 7) < 1.7
+        && healable.velocity.x === 0
         && healable.enemy === null && healable.goal === 'fresh'
         && Bot.prototype.needsHeal.call(healable) === false);
     ok('a healthy soldier is left alone', Bot.prototype.needsHeal.call({
@@ -329,10 +332,10 @@ group('modes.js — no regressions in the two team modes');
 // animation angle, and the scale correction taken from what the page drew rather
 // than what the loader reported. Both live in one module the game and the tester
 // share, and both are plain arithmetic — so they are testable here, in Node.
-group('rebel-pose.js — the FBX calibration both pages share');
+group('rebel-pose.js — the FBX calibration the bot rig runs on');
 {
     const src = await readFile(new URL('../src/js/rebel-pose.js', import.meta.url), 'utf8');
-    ok('the pose table is its own module, so the game and the tester cannot drift',
+    ok('the pose table is its own module, so the rig and the rules read one source',
         /STAND_FLIP/.test(src) && !/document\.|WebGLRenderer/.test(src), src.split('\n')[0].slice(0, 40));
 
     ok('the flip covers exactly the four limb roots, and nothing else',
@@ -351,7 +354,6 @@ group('rebel-pose.js — the FBX calibration both pages share');
 
     // and both consumers actually use it
     const rebel = await readFile(new URL('../src/js/rebel.js', import.meta.url), 'utf8');
-    const tester = await readFile(new URL('../src/tester/tester.js', import.meta.url), 'utf8');
     // The flip used to be unconditional, which is how "the feet are where the head
     // is and there are no hands" happened: the same half-turn that unfolds a rig
     // that shipped folded ties a rig that ships standing into a knot. So both pages
@@ -368,30 +370,28 @@ group('rebel-pose.js — the FBX calibration both pages share');
         && !/Object\.keys\(POSE_JOINTS\)\.map/.test(rebel));
     ok('the flip the bot rig applies is the one it measured, with no constant behind it',
         /flip: S\.standFlip \|\| NO_FLIP/.test(rebel) && !/STAND_FLIP\[name\]/.test(rebel));
-    ok('neither page writes a channel the helper does not read (no .bend, no .rx)',
-        !/\.bend\b/.test(rebel) && !/\.bend\b/.test(tester) && !/\.rx\b/.test(tester));
+    ok('the rig writes no channel the helper does not read (no .bend, no .rx)',
+        !/\.bend\b/.test(rebel) && !/\.rx\b/.test(rebel));
     ok('and the shared helper has one shape to accept, so the two cannot drift',
         /poseBones\(bones, rest, angles, \{ k = 1, flip = null, easeOthers = true \} = \{\}\)/.test(
             await readFile(new URL('../src/js/rebel-pose.js', import.meta.url), 'utf8')));
-    ok('the test page decides it the same way and poses through the same helper',
-        /rig\.standFlip = flipFromJoints\(jointY\)/.test(tester)
-        && /poseBones\(b, s\.rest \|\| rig\.rest, t, \{/.test(tester)
-        && /rig\.rest = restPoseOf\(rig\.bones\)/.test(tester));
-    ok('the box is not what decides it any more, on either page',
-        !/chooseStandFlip/.test(rebel) && !/chooseStandFlip/.test(tester));
-    ok('the test page prints the evidence it judged on',
-        /standJoints = \{/.test(tester) && /ankle \$\{rig\.standJoints\.ankleL\}/.test(tester));
-    ok('neither page writes an angle by assignment any more',
-        !/bone\.rotation\.[xyz] \+= \(tg\./.test(tester) && !/b\.rotation\.x \+= \(g\.x/.test(rebel));
-    ok('and neither one clears the bones to measure them, which is how the fold was invented',
-        !/setTable\(/.test(rebel) && !/setTable\(/.test(tester));
-    ok('both pages agree on one joint table, imported rather than copied',
-        /POSE_JOINTS/.test(await readFile(new URL('../src/js/rebel-pose.js', import.meta.url), 'utf8'))
-        && /poseBones\(/.test(rebel) && /poseBones\(/.test(tester));
+    ok('the module exports what a second consumer would need, unchanged',
+        /export const STAND_FLIP/.test(src) && /export function flipFromJoints/.test(src)
+        && /export function poseBones/.test(src));
+    ok('the box is not what decides it any more',
+        !/chooseStandFlip/.test(rebel));
+    ok('the rig reports the height it drew next to the height the file claimed',
+        /rawHeight: \+S\.rawHeight\.toFixed\(2\)/.test(rebel) && /height: S\.drew \|\| TARGET_HEIGHT/.test(rebel));
+    ok('the rig never writes an angle by assignment',
+        !/b\.rotation\.x \+= \(g\.x/.test(rebel));
+    ok('and it never clears the bones to measure them, which is how the fold was invented',
+        !/setTable\(/.test(rebel));
+    ok('one joint table, imported rather than copied',
+        /POSE_JOINTS/.test(src) && /poseBones\(/.test(rebel));
     ok('the bot rig sizes itself from what it drew, once, and shares the fit',
         /fitFactor\(h\)/.test(rebel) && /if \(!S\.calibrated\)/.test(rebel));
-    ok('the test page dresses its range with clones of the model',
-        /cloneRig\(rig\.group\)/.test(tester) && /userData\.part = isHead \? 'head' : 'body'/.test(tester));
+    ok('the seam is still off by default, so the shipped soldiers stay the GLB ones',
+        /DEFAULT_MODE = 'off'/.test(rebel));
 }
 
 // A canvas that is good enough for three's texture helpers to be constructed
@@ -750,6 +750,7 @@ group('difficulty.js — easy / medium / hard');
 group('modes.js — Gun Game, described honestly');
 {
     const modes = await readFile(new URL('../src/js/modes.js', import.meta.url), 'utf8');
+    const aiSrc = await readFile(new URL('../src/js/ai.js', import.meta.url), 'utf8');
     ok('the target is a named constant, not a number repeated in three places',
         /export const GUN_GAME_KILLS = 75;/.test(modes) && /this\.killTarget = GUN_GAME_KILLS;/.test(modes));
     ok('the playlist card says 75 kills and cycling guns',
@@ -1014,6 +1015,253 @@ group('map scale — geometry, collision, tables and textures move together');
         Math.abs(U.MAP_RECT.maxX / 42 - U.MAP_SCALE) < 1e-12);
     ok('so a soldier spawned at the far fence is still inside it',
         (() => { const p = { x: U.MAP_RECT.maxX - 0.2, z: 0 }; U.clampToMap(p, 2.4); return p.x <= U.MAP_RECT.maxX - 2.4 + 1e-9; })());
+}
+
+// ── 15. this pass: the menu, the mouse, the callsign, the ground ────────────
+// Twelve reports, answered one at a time. Each gets a rule that says the same
+// thing the complaint said, so "the fog stayed on the menu" cannot quietly come
+// back the next time somebody touches the grade or the pause key.
+group('the punch list — menus, mouse, callsign, cover and room to roam');
+{
+    const mj = await readFile(new URL('../src/js/main.js', import.meta.url), 'utf8');
+    const html = await readFile(new URL('../src/index.html', import.meta.url), 'utf8');
+    const hud = await readFile(new URL('../src/js/hud.js', import.meta.url), 'utf8');
+    const map = await readFile(new URL('../src/js/map.js', import.meta.url), 'utf8');
+    const modes = await readFile(new URL('../src/js/modes.js', import.meta.url), 'utf8');
+    const aiSrc = await readFile(new URL('../src/js/ai.js', import.meta.url), 'utf8');
+    const ply = await readFile(new URL('../src/js/player.js', import.meta.url), 'utf8');
+    const ai = await readFile(new URL('../src/js/ai.js', import.meta.url), 'utf8');
+
+    // 1 — the nuke's whiteout used to stay on the main menu, because the grade is
+    // written every frame from streak state and nothing cleared that state.
+    ok('leaving a match resets the streaks that own the screen',
+        /function toMenu\(\) \{[\s\S]{0,900}?if \(streaks\) streaks\.reset\(\);\n\s*if \(hud\.abortNuke\) hud\.abortNuke\(\);/.test(mj));
+    ok('so does the end card',
+        /function endMatch\(\)[\s\S]{0,400}?if \(streaks\) streaks\.reset\(\);/.test(mj));
+    ok('the nuke overlay has an abort that does not play its flash', /abortNuke\(\) \{/.test(hud));
+    ok('and the grade is switched off outside a match, at the source',
+        /const graded = state === 'playing' \|\| state === 'paused';/.test(mj)
+        && /g\.whiteout\.value = graded && streaks\.nukeFired/.test(mj)
+        && /g\.damage\.value = graded \?/.test(mj) && /g\.death\.value = graded \?/.test(mj)
+        && /composerFX\.bloom\.strength = 0\.34 \+ \(graded && streaks\.nukeFired/.test(mj));
+
+    // 12 — free cursor on every screen you click, mouse captured only in play.
+    ok('one helper hands the mouse back',
+        /function releaseCursor\(\)/.test(mj)
+        && /if \(document\.pointerLockElement\) document\.exitPointerLock\(\);\n\s*document\.body\.classList\.remove\('playing'\);/.test(mj));
+    ok('menu, pause, end card and the first-run gate all release it',
+        /function toMenu\(\) \{[\s\S]{0,500}?releaseCursor\(\);/.test(mj)
+        && /if \(on\) releaseCursor\(\);/.test(mj)
+        && /function endMatch\(\)[\s\S]{0,300}?releaseCursor\(\);/.test(mj)
+        && /function showDiffGate\(\)[\s\S]{0,300}?releaseCursor\(\);/.test(mj));
+    ok('the settings card counts as a menu, so its sliders are clickable',
+        /function menuOpen\(\) \{[\s\S]{0,400}?const pn = \$\('panel'\);\n\s*if \(pn && pn\.style\.display === 'flex'\) return true;/.test(mj));
+    ok('nothing re-captures the mouse behind an overlay',
+        /if \(state === 'playing' && !menuOpen\(\) && !document\.pointerLockElement\) grabPointer\(\);/.test(mj));
+    ok('the hidden system cursor follows the menus, not just the lock',
+        /document\.body\.classList\.toggle\('playing', locked && !menuOpen\(\)\);/.test(mj));
+    ok('and losing the lock while a menu is up does not pause the game again',
+        /if \(!locked && state === 'playing' && player\.alive && !menuOpen\(\)\) pause\(true\);/.test(mj));
+
+    // 11 — the callsign: asked for above the difficulty, shown wherever scores are.
+    ok('the name is filtered and bounded, not trusted',
+        /function cleanCallsign\(raw\)/.test(mj) && /slice\(0, 14\)/.test(mj));
+    {
+        const m = mj.match(/function cleanCallsign\(raw\) \{[\s\S]*?\n\}/);
+        ok('and the filter does what it claims on the strings people paste', (() => {
+            if (!m) return false;
+            const body = m[0].slice(m[0].indexOf('{') + 1, m[0].lastIndexOf('}'));
+            const f = new Function('raw', body);
+            const a = f('<b>Private</b> "Rex"! <i>x</i>');
+            return !/[<>&"'!\][]/.test(a) && a.length <= 14
+                && f('   ') === 'SOLDIER-01' && f(null) === 'SOLDIER-01' && f('Åsa_9') === 'Åsa_9';
+        })(), m ? 'the real body, run here' : 'cleanCallsign not found');
+    }
+    ok('the gate asks for the name before it asks for the difficulty',
+        html.indexOf('id="gateName"') > 0 && html.indexOf('id="gateName"') < html.indexOf('id="diffGateOpts"'),
+        `field at ${html.indexOf('id="gateName"')}, options at ${html.indexOf('id="diffGateOpts"')}`);
+    ok('and the menu can change it without the gate', /id="menuName"[\s\S]{0,240}class="callsignInput"/.test(html));
+    ok('the field is 14 characters, like the row it sits in',
+        /id="nameMenu" type="text" maxlength="14"/.test(html) && /id="nameGate" type="text" maxlength="14"/.test(html));
+    ok('typing it is not gameplay: the field swallows the keystroke',
+        /el\.addEventListener\('keydown', e => \{\n\s*e\.stopPropagation\(\);/.test(mj));
+    ok('the board prints the callsign, not "You"',
+        /name: player\.name \|\| 'You'/.test(hud) && (modes.match(/name: e\.name \|\| 'You',/g) || []).length >= 2);
+    ok('the kill feed says the same thing',
+        (mj.match(/player\.name \|\| callsign\(\)/g) || []).length === 2);
+    ok('it is written down the moment the field loses focus',
+        /el\.addEventListener\('blur', \(\) => applyCallsign\(el\.value\)\)/.test(mj));
+    ok('the player object gets it even though it was built before the profile loaded',
+        /loadSettings\(\);\n\s*\/[\s\S]{0,400}?\n\s*applyCallsign\(settings\.name\);/.test(mj));
+
+    // 8 — cover that only worked one way. Foliage stops legs and never bullets,
+    // and both sides read the same set, so it cannot lean.
+    const { CollisionWorld, SOFT_COVER } = await import('../src/js/physics.js');
+    {
+        const w = new CollisionWorld();
+        w.addAABB(2, 0, -1, 2.6, 1.4, 1, 'bush');
+        w.addAABB(6, 0, -1, 6.6, 2.4, 1, 'solid');
+        const o = { x: 0, y: 1.2, z: 0 }, dir = { x: 1, y: 0, z: 0 };
+        const hard = w.raycast(o, dir, 20);
+        const soft = w.raycast(o, dir, 20, SOFT_COVER);
+        ok('a hedge stops a movement ray', !!hard && Math.abs(hard.distance - 2) < 1e-6, hard && hard.tag);
+        ok('the bullet rule gives the shot to the wall behind it instead',
+            !!soft && soft.tag === 'solid' && Math.abs(soft.distance - 6) < 1e-6,
+            soft && `${soft.tag}@${soft.distance.toFixed(2)}`);
+        ok('sightlines use the bullet rule by default, so neither side gets a free look',
+            w.isLineOfSight(o, { x: 5, y: 1.2, z: 0 }) === true
+            && w.isLineOfSight(o, { x: 9, y: 1.2, z: 0 }) === false);
+    }
+    ok("the player's hitscan and the bots' both pass that set",
+        /this\.cw\.raycast\(origin, dir, d\.range, SOFT_COVER\)/.test(ply)
+        && /cw\.raycast\(muzzle, dir, w\.range, SOFT_COVER\)/.test(ai));
+    ok('stairs are NOT in the soft list — a tread still stops a round',
+        !SOFT_COVER.has('stairs') && SOFT_COVER.size === 1, [...SOFT_COVER].join(','));
+
+    // 3 — the holes in the bushes.
+    ok('bush jitter is decided per corner, and re-used by every triangle sharing it',
+        /const jit = new Map\(\)/.test(map) && /if \(k === undefined\)/.test(map));
+    ok('the per-row random that tore the surface is gone',
+        !/const k = 0\.84 \+ Math\.random\(\) \* 0\.30;\n\s*pos\.setXYZ/.test(map));
+
+    // 2 — the floor that flickered: a plinth and a finished floor on one plane.
+    ok('plinths sit under their floors, not level with them',
+        /box\(w \+ 0\.5, 0\.5, d \+ 0\.5, cx, -0\.06, cz, mats\.concrete/.test(map)
+        && /box\(w \+ 0\.5, 0\.4, d \+ 0\.5, cx, -0\.05, cz, mats\.concrete/.test(map)
+        && /box\(w \+ 0\.4, 0\.26, d \+ 0\.4, cx, -0\.05, cz, mats\.concrete/.test(map));
+    ok('the top porch step no longer meets the deck at the same height',
+        /box\(0\.4, 0\.26, 2\.4, 15\.42, 0\.13, -5\.8/.test(map));
+    ok('walk height is untouched: the floor boxes did not move',
+        /box\(w, floor, d, cx, floor \/ 2, cz, mats\.floor, \{ tag: 'wood' \}\);/.test(map));
+
+    // 5 — a stair that looked like it was leaning on nothing.
+    ok('a flight carries stringers that cast, and a post every other tread',
+        /deco\(0\.14, 0\.42, len, px, cy, pz, mat, \{ rotX: -dir \* ang \}\);/.test(map)
+        && /for \(let i = 1; i < steps; i \+= 2\)/.test(map));
+    ok('and the long flights get a centre stringer under the treads',
+        /if \(steps >= 10\) \{/.test(map) && /0\.5, len, mx, mid, mz, mat/.test(map));
+
+    // 6 — 45% bigger had to mean room, not just fence.
+    ok('a team has more places to start than it has soldiers',
+        SPAWN_A.length >= 10 && SPAWN_B.length === SPAWN_A.length, `${SPAWN_A.length} candidates`);
+    ok('no two candidates on a team are within 4 m, so nobody deploys inside a teammate', (() => {
+        let bad = 0, min = Infinity;
+        for (const list of [SPAWN_A, SPAWN_B])
+            for (let i = 0; i < list.length; i++)
+                for (let j = i + 1; j < list.length; j++) {
+                    const d = Math.hypot(list[i].x - list[j].x, list[i].z - list[j].z);
+                    if (d < min) min = d;
+                    if (d < 4) bad++;
+                }
+        return bad === 0;
+    })());
+    ok('and a list is long enough that eight solos never wrap around it',
+        SPAWN_A.length * 2 >= 8 * 2, `${SPAWN_A.length} × 2 teams vs 8 players`);
+    ok('the deploy writes down the spread it actually bought, at the moment it decides',
+        /const placed = \[\];/.test(modes)
+        && /placed\.push\(\{ x: p\.position\.x, z: p\.position\.z \}\);/.test(modes)
+        && /placed\.push\(\{ x: b\.position\.x, z: b\.position\.z \}\);/.test(modes)
+        && !/placed\.push\(sp\);/.test(modes)
+        && /this\._deploySpread = \{/.test(modes));
+    ok('the deploy records where the soldiers were actually put, ring offset included',
+        /placed\.push\(\{ x: p\.position\.x, z: p\.position\.z \}\);/.test(modes)
+        && /placed\.push\(\{ x: b\.position\.x, z: b\.position\.z \}\);/.test(modes));
+    ok('the claim ledger is shared per team, not kept by each soldier',
+        /spawnLedger\(this\.team\)/.test(aiSrc) && !/this\._claim/.test(aiSrc));
+    ok('the player claims their spawn so no bot is dropped on top of them',
+        /player\.respawn\(claimPoint\(randElement\(SPAWN_A\), TEAM_A, 3\)\)/.test(mj)
+        && /return claimPoint\(best, TEAM_A, 3\);/.test(mj));
+    ok('a ring place is only used if it is clear of walls, fences and steps',
+        /export function pickRingSlot\(sp, cw, start = takeRingSlot\(sp\)\)/.test(aiSrc)
+        && /this\._ring = pickRingSlot\(sp, this\._cw, takeRingSlot\(sp\)\);/.test(aiSrc)
+        && /if \(cw\) this\._cw = cw;/.test(aiSrc)
+        && /b\.tag === 'bound' \|\| b\.tag === 'ground' \|\| b\.tag === 'bush' \|\| b\.tag === 'glass'/.test(aiSrc));
+    ok('and the wave of placements is written down for the harness to read',
+        /export function deploySpread\(\)/.test(aiSrc)
+        && /deploySpread: \(\) => deploySpread\(\)/.test(mj)
+        && /notePlacement\(best, nowSec\)/.test(aiSrc)
+        && /resetDeploySpread\(\);/.test(mj));
+    {
+        const ai = await import('../src/js/ai.js');
+        const pts = ai.spawnOffset ? [0, 1, 2, 3, 4, 5].map(i => ai.spawnOffset(i)) : [];
+        let ringMin = 0;
+        for (let i = 0; i < pts.length; i++)
+            for (let j = i + 1; j < pts.length; j++)
+                ringMin = ringMin ? Math.min(ringMin, Math.hypot(pts[i].dx - pts[j].dx, pts[i].dz - pts[j].dz))
+                    : Math.hypot(pts[i].dx - pts[j].dx, pts[i].dz - pts[j].dz);
+        ok('each spawn point hands out six places, and no two of them are the same',
+            pts.length === 6 && pts.every(o => Number.isFinite(o.dx) && Number.isFinite(o.dz)));
+        ok('the closest two places on the ring are 1.6 m apart, so a mate cannot stand inside you',
+            (() => {
+                let min = Infinity;
+                for (let i = 0; i < pts.length; i++) for (let j = i + 1; j < pts.length; j++)
+                    min = Math.min(min, Math.hypot(pts[i].dx - pts[j].dx, pts[i].dz - pts[j].dz));
+                return min > 1.5;
+            })(),
+            ringMin ? `${ringMin.toFixed(2)} m apart` : 'no ring');
+        ok('the ring is taken in order, per point', (() => {
+            const sp = { x: 1, z: 2 };
+            const a = ai.takeRingSlot(sp), b = ai.takeRingSlot(sp), c = ai.takeRingSlot(sp);
+            return a === 0 && b === 1 && c === 2 && ai.takeRingSlot({ x: 9, z: 9 }) === 0;
+        })());
+        ok('nine soldiers on one shared ledger get nine different points', (() => {
+            const claim = new Map();
+            const list = Array.from({ length: 13 }, (_, i) => ({ x: i * 8, z: 0 }));
+            const got = Array.from({ length: 9 }, () => ai.claimSpawnPoint(list, claim, 0.1));
+            return new Set(got).size === 9;
+        })());
+        ok('and a point just handed to someone is not handed to the next one', (() => {
+            const claim = new Map();
+            const list = [{ x: 0, z: 0 }, { x: 40, z: 40 }];
+            const a = ai.claimSpawnPoint(list, claim, 0);
+            const b = ai.claimSpawnPoint(list, claim, 0.1);
+            const c = ai.claimSpawnPoint(list, claim, 5.0);      // the ledger has expired
+            return a !== b && c !== undefined;
+        })());
+    }
+    ok('nothing in the deploy touches the record before it is declared', (() => {
+        const d = modes.slice(modes.indexOf('_deploy() {'));
+        const body = d.slice(0, d.indexOf('\n    }'));
+        const decl = body.indexOf('const placed');
+        let first = -1;
+        for (let i = body.indexOf('placed'); i >= 0; i = body.indexOf('placed', i + 1)) {
+            if (i < decl && !/^\s*\/\//.test(body.slice(body.lastIndexOf('\n', i) + 1, i))) { first = i; break; }
+        }
+        return decl > 0 && (first === -1 || first > decl);
+    })());
+    ok('the harness reads that record rather than where the soldiers happen to be now',
+        /_deploySpread/.test(await readFile(new URL('../scripts/verify.mjs', import.meta.url), 'utf8')));
+    ok('the deploy takes the candidate furthest from everyone already placed',
+        /const sp = farthestSpawn\(onA \? TEAM_A : TEAM_B, onA \? takenA : takenB, \(onA \? ia : ib\)\);/.test(modes)
+        && /if \(onA\) takenA\.push\(sp\); else takenB\.push\(sp\);/.test(modes));
+    ok("the bots' patrol ring grew with the ground it patrols", (() => {
+        const ring = WAYPOINTS.filter(w => Math.hypot(w.x, w.z) > 18 && Math.hypot(w.x, w.z) < 25);
+        return ring.length >= 8;
+    })(), `${WAYPOINTS.filter(w => Math.hypot(w.x, w.z) > 18 && Math.hypot(w.x, w.z) < 25).length} nodes in the grown ring`);
+    ok('the spawn lists speak the scaled metres, not the authored ones',
+        Math.abs(SPAWN_A[0].x) > 34 && Math.abs(SPAWN_A[0].x) < 62, `first candidate at x ${SPAWN_A[0].x}`);
+
+    // 10 — the tester page is out, and the game keeps its own soldiers.
+    ok('the model tester is gone from the tree, the scripts and the routes',
+        !existsSync(new URL('../src/tester', import.meta.url))
+        && !existsSync(new URL('../public/tester', import.meta.url))
+        && !existsSync(new URL('../scripts/build-tester.mjs', import.meta.url))
+        && !/"tester":/.test(await readFile(new URL('../package.json', import.meta.url), 'utf8'))
+        && !/\/tester\//.test(await readFile(new URL('../vercel.json', import.meta.url), 'utf8')));
+    ok('the zip no longer carries its source or its private assets',
+        !/src\/tester|src\/assets\/rebel/.test(await readFile(new URL('../scripts/make-deploy-zip.mjs', import.meta.url), 'utf8')));
+    ok('the imported model is still off by default, so the old soldiers ship',
+        /DEFAULT_MODE = 'off'/.test(await readFile(new URL('../src/js/rebel.js', import.meta.url), 'utf8')));
+
+    // 4 + 7 — the two things you read on paper: a folded label, and orange soup.
+    ok('a settings label holds its line instead of folding one word per row',
+        /\.rowSet label\{[\s\S]{0,220}?white-space:nowrap/.test(html));
+    ok('the sentence beside "Enemy skill" is typeset as a sentence',
+        /id="diffOut" class="note"/.test(html) && /\.rowSet output\.note\{flex:1 1 100%/.test(html));
+    ok('one filled button per screen: the primary is the only solid orange',
+        /\.menuBtn\.primary\{background:linear-gradient\(180deg,#FF8A33,var\(--accent\)\)/.test(html)
+        && /position:relative;background:linear-gradient\(180deg,rgba\(159,178,192,\.10\)/.test(html));
+    ok('quitting is the one red thing in the menu', /#btnQuit\{color:#F0B7B7/.test(html));
 }
 
 console.log(`\n${fail === 0 ? '✓' : '✗'} ${pass} passed, ${fail} failed\n`);

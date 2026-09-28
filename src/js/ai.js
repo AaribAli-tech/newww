@@ -15,6 +15,7 @@ import { rigFor } from './rebel.js';
 import { WEAPON_DEFS, BOT_WEAPON_POOL } from './weapons.js';
 import { WAYPOINTS, SPAWN_A, SPAWN_B, PERCHES } from './map.js';
 import { TEAM_A, rand, randElement, dist2D, clamp, clampToMap } from './utils.js';
+import { SOFT_COVER } from './physics.js';
 
 const ST = { PATROL: 0, HUNT: 1, ENGAGE: 2, RELOAD: 3, FALLBACK: 4, HOLD: 5, DEAD: 6 };
 const EYE = 1.52, EYE_CROUCH = 1.02;
@@ -23,6 +24,152 @@ const VIEW_RANGE = 46;
 const FOV_DOT = Math.cos(1.15);        // ~132° total awareness cone
 
 const _a = new THREE.Vector3(), _b = new THREE.Vector3(), _c = new THREE.Vector3();
+
+/**
+ * Where the nth soldier to land on one spawn point stands.
+ *
+ * Each point keeps its own counter and hands out six fixed places around it,
+ * because the random ±1.2 m offset this replaced could — and did, in a nine-man
+ * lobby spawning on a thirteen-point list — give two soldiers the same offset.
+ * Standing inside a teammate is what "the bodies look clumped into them" meant:
+ * the model was fine, the drop was crowded.
+ */
+export function nowSec() {
+    return typeof performance !== 'undefined' && performance.now
+        ? performance.now() / 1000 : Date.now() / 1000;
+}
+
+export const SPAWN_RING = 6;
+export const SPAWN_RING_R = 1.6;
+export function spawnOffset(index) {
+    const a = (index / SPAWN_RING) * Math.PI * 2 + 0.4;
+    return { dx: Math.cos(a) * SPAWN_RING_R, dz: Math.sin(a) * SPAWN_RING_R };
+}
+
+/**
+ * Which spawn point to take when nobody was told: the one claimed by the fewest
+ * soldiers in the last couple of seconds.
+ *
+ * The ledger is shared per team, on purpose. When it hung off the individual
+ * soldier, every bot read an empty book and they all walked to the first line of
+ * the table — four teammates standing in a ring around one spawn while the other
+ * twelve points sat empty. That is the exact shape of "your bots look like the
+ * bodies are clumped into them".
+ */
+const ledgers = new Map();
+export function spawnLedger(team) {
+    let m = ledgers.get(team);
+    if (!m) ledgers.set(team, m = new Map());
+    return m;
+}
+
+export function claimSpawnPoint(list, claim, nowSec = 0) {
+    let best = list[0], bestN = Infinity;
+    for (const s of list) {
+        const held = claim.get(s);
+        const n = held && held.until > nowSec ? held.n : 0;
+        if (n < bestN) { bestN = n; best = s; }
+    }
+    const held = claim.get(best);
+    if (held && held.until > nowSec) { held.n++; held.until = nowSec + 2.0; }
+    else claim.set(best, { n: 1, until: nowSec + 2.0 });
+    if (claim.size > 96) for (const [k, v] of claim) if (v.until <= nowSec) claim.delete(k);
+    notePlacement(best, nowSec);
+    return best;
+}
+
+/**
+ * The last wave of placements, as the game saw them. A wave is the run of
+ * soldiers put down within half a second of each other — which is what a match
+ * start is, and what a cluster of respawns after a grenade is. Written down at
+ * the moment of the decision, because by the time anyone looks the soldiers have
+ * walked together and the measurement means nothing.
+ */
+let wave = null;
+export function deploySpread() { return wave; }
+/**
+ * A new match means the table is dealt out again, so the previous hand is
+ * forgotten. Left in place, two `startMatch()` calls in a row read as one crowd
+ * of eighteen soldiers standing on nine points, and the harness blames a spawn
+ * table that is actually fine.
+ */
+export function resetDeploySpread() { wave = null; }
+function notePlacement(sp, nowSec) {
+    if (!wave || nowSec - wave.t > 0.5) wave = { t: nowSec, pts: [{ x: sp.x, z: sp.z }], nearest: Infinity, widest: 0 };
+    else wave.pts.push({ x: sp.x, z: sp.z });
+    let nearest = Infinity, widest = 0;
+    for (let i = 0; i < wave.pts.length; i++) {
+        for (let j = i + 1; j < wave.pts.length; j++) {
+            const d = Math.hypot(wave.pts[i].x - wave.pts[j].x, wave.pts[i].z - wave.pts[j].z);
+            if (d < nearest) nearest = d;
+            if (d > widest) widest = d;
+        }
+    }
+    wave.count = wave.pts.length;
+    wave.nearest = wave.pts.length > 1 ? +nearest.toFixed(2) : 0;
+    wave.widest = +widest.toFixed(1);
+}
+
+/**
+ * Mark a point as taken by somebody who chose it for themselves — the player, at
+ * the start of a match and on every respawn. Without this, the soldier who picks
+ * the table next has no idea a man is standing there already and materialises on
+ * top of them. The claim fades after a few seconds, once that player has moved.
+ */
+export function claimPoint(sp, team, seconds = 3) {
+    const claim = spawnLedger(team);
+    claim.set(sp, { n: 99, until: nowSec() + seconds });
+    notePlacement(sp, nowSec());
+    return sp;
+}
+
+/**
+ * True if a soldier standing at x/z would be inside something solid at torso
+ * height, or would be stood up on a step, a verge or a porch. Bushes and glass
+ * are not obstacles to being put down in: soft cover is meant to be stood in,
+ * and a pane is not a wall. Same shapes the browser harness reads, so the two
+ * never disagree about what "buried" means.
+ */
+function footingBlocked(cw, x, z) {
+    if (!cw || !cw.boxes) return false;
+    const r = 0.34;
+    for (const b of cw.boxes) {
+        if (b.tag === 'bound' || b.tag === 'ground' || b.tag === 'bush' || b.tag === 'glass') continue;
+        if (x + r <= b.minX || x - r >= b.maxX || z + r <= b.minZ || z - r >= b.maxZ) continue;
+        if (b.minY <= 0.2 && b.maxY >= 1.2) return true;
+    }
+    if (cw.groundHeight) {
+        const g = cw.groundHeight(x, z, 2.2, 0.42, []);
+        if (!Number.isFinite(g) || Math.abs(g) > 0.15) return true;
+    }
+    return false;
+}
+
+/**
+ * The next place on the ring that is actually clear.
+ *
+ * Going round the ring in order fixed the soldiers standing inside each other,
+ * and it briefly put one of them inside the stairs instead: a spawn point can sit
+ * in a clear lane and still have a ring place that lands on a fence or a step.
+ * So the order is kept, and each place is checked before it is used.
+ */
+export function pickRingSlot(sp, cw, start = takeRingSlot(sp)) {
+    if (!cw || !cw.boxes) return start;
+    for (let k = 0; k < SPAWN_RING; k++) {
+        const i = (start + k) % SPAWN_RING;
+        const o = spawnOffset(i);
+        if (!footingBlocked(cw, sp.x + o.dx, sp.z + o.dz)) return i;
+    }
+    return start;
+}
+
+/** Round-robin over the ring, per point, for however long the map lives. */
+const ringIndex = new Map();
+export function takeRingSlot(sp) {
+    const i = ringIndex.get(sp) | 0;
+    ringIndex.set(sp, (i + 1) % SPAWN_RING);
+    return i;
+}
 
 export class Bot {
     constructor(name, team, scene, skill = 0.5) {
@@ -109,8 +256,13 @@ export class Bot {
         // everyone across both clusters so eight solos do not stack in one lane).
         const list = this.spawnPoints && this.spawnPoints.length
             ? this.spawnPoints : (this.team === TEAM_A ? SPAWN_A : SPAWN_B);
-        const sp = pos || randElement(list);
-        this.position.set(sp.x + rand(-1.2, 1.2), 0, sp.z + rand(-1.2, 1.2));
+        const sp = pos || claimSpawnPoint(list, spawnLedger(this.team), nowSec());
+        // Not a random shove: a fixed place on the point's own ring, so whoever
+        // lands here second is 1.6 m to the side and not inside you. The place is
+        // chosen clear of walls and steps when the collision world is known to us.
+        this._ring = pickRingSlot(sp, this._cw, takeRingSlot(sp));
+        const off = spawnOffset(this._ring);
+        this.position.set(sp.x + off.dx, 0, sp.z + off.dz);
         clampToMap(this.position, 2.4);          // nobody is born in the fence strip
         this.velocity.set(0, 0, 0);
         this.health = this.maxHealth;
@@ -284,7 +436,8 @@ export class Bot {
     selfHeal() {
         const sp = randElement(this.spawnPoints && this.spawnPoints.length
             ? this.spawnPoints : (this.team === TEAM_A ? SPAWN_A : SPAWN_B));
-        this.position.set(sp.x, 0, sp.z);
+        const off = spawnOffset(pickRingSlot(sp, this._cw, takeRingSlot(sp)));
+        this.position.set(sp.x + off.dx, 0, sp.z + off.dz);
         this.velocity.set(0, 0, 0);
         this.goal = null;
         this.enemy = null;
@@ -293,6 +446,9 @@ export class Bot {
 
     update(dt, now, entities, cw, viewer) {
         this.events.length = 0;
+        // Kept so the first call after a death can pick a spawn that is not inside
+        // a wall: spawn() happens before this bot is ticked again.
+        if (cw) this._cw = cw;
 
         if (this.needsHeal()) this.selfHeal();
 
@@ -585,7 +741,7 @@ export class Bot {
             const sp = this.spreadScale;
             miss.x += rand(-1.6, 1.6) * sp; miss.y += rand(-0.7, 1.1) * sp; miss.z += rand(-1.6, 1.6) * sp;
             const dir = miss.clone().sub(muzzle).normalize();
-            const h = cw.raycast(muzzle, dir, w.range);
+            const h = cw.raycast(muzzle, dir, w.range, SOFT_COVER);
             this.events.push({
                 type: 'miss', from: muzzle, to: h ? h.point : muzzle.clone().addScaledVector(dir, w.range),
                 normal: h ? h.normal : null, shooter: this, near: enemy
