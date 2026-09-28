@@ -378,7 +378,11 @@ function buildHouse(kind) {
 
     // ── upper floor exterior walls ──
     const UWIN = { y0: 4.05, y1: 5.35 };
-    const balDoor = [{ a: -8.3, b: -5.6, y0: midTop, y1: 5.55 }];
+    // Was a door opening, 2.7 m tall, from the balcony deck straight into the
+    // upper front room. Closed up on request — the front door is the only way in
+    // to this house — and turned into a window, so the room keeps its light and
+    // the balcony stays a firing position instead of a second entrance.
+    const balDoor = [{ a: -8.1, b: -5.8, y0: 4.15, y1: 5.3 }];
     const upFrontWin = [{ a: -4.2, b: -2.8, ...UWIN }];
     const upBackWin = [{ a: -8.4, b: -7.0, ...UWIN }, { a: -3.6, b: -2.2, ...UWIN }];
     const upNorthWin = [{ a: 20.0, b: 21.4, ...UWIN }];
@@ -410,9 +414,9 @@ function buildHouse(kind) {
     deco(1.7, 0.12, 0.24, 24.0, 3.5, z1 + 0.06, mats.trim, { cast: false });
     deco(0.1, 1.6, 0.2, 23.15, 4.35, z1 + 0.06, mats.trim, { cast: false });
     deco(0.1, 1.6, 0.2, 24.85, 4.35, z1 + 0.06, mats.trim, { cast: false });
-    // balcony door frame + one leaf swung open over the deck
-    deco(0.22, 0.16, 3.1, x0 - 0.12, 5.63, -6.95, mats.trim);
-    deco(0.06, 2.1, 1.3, 17.45, 4.4, -7.95, mats.glass, { rotY: -1.0, cast: false });
+    // The swung-open leaf is gone. What is left is a pane and its sill.
+    windowGlass('z', -8.1, -5.8, 4.15, 5.3, x0, mats);
+    deco(2.5, 0.1, 0.22, x0 - 0.12, 4.1, -6.95, mats.trim, { cast: false });
 
     // ── upper divider + stairwell railing ──
     wallX(x0 + t / 2, 25.4, -4.9, midTop, top, 0.2, mats.paper, [{ a: 21.8, b: 23.6, y0: midTop, y1: 5.5 }]);
@@ -554,6 +558,10 @@ function buildGarage(mats) {
     box(0.7, 0.1, 2.6, x1 - 0.45, 1.0, cz + 0.1, mats.wood, { tag: 'prop' });
     for (const oz of [cz - 1.0, cz + 1.15]) deco(0.6, 0.85, 0.1, x1 - 0.45, 0.57, oz, mats.wood, { cast: false });
     for (let i = 0; i < 3; i++) deco(0.55, 0.06, 2.2, x1 - 0.42, 1.5 + i * 0.6, cz - 0.4, mats.wood);
+    // The boards are bolted to the wall at one end and to a post at the other, so
+    // they stop being planks in mid-air. Same two uprights carry all three shelves.
+    for (const oz2 of [cz - 1.45, cz + 0.65])
+        deco(0.09, 2.7, 0.09, x1 - 0.68, 1.35, oz2, mats.wood);
     for (const [dx, dz] of [[x0 + 0.85, z1 - 0.7], [x0 + 0.85, z1 - 1.6]]) {
         cylinder(0.32, 0.32, 0.9, 14, dx, 0.6, dz, M.rustyMetal(), { solid: true, tag: 'prop' });
     }
@@ -613,6 +621,11 @@ function furnishHouse(mats) {
     for (const oz of [-4.8, -3.6]) {
         box(0.45, 0.08, 0.45, 22.0, F + 0.45, oz, mats.wood, { tag: 'prop' });
         deco(0.45, 0.55, 0.07, 22.0, F + 0.74, oz + (oz < -4 ? -0.2 : 0.2), mats.wood);
+        // Four legs. The seat and the back were built and the legs were not, so
+        // every chair in the kitchen hung forty centimetres off the floor — the
+        // single most obvious thing wrong with the inside of this house.
+        for (const lx of [-0.17, 0.17]) for (const lz of [-0.17, 0.17])
+            deco(0.07, 0.41, 0.07, 22.0 + lx, F + 0.205, oz + lz, mats.wood, { cast: false });
     }
 
     // ── upstairs ──
@@ -735,13 +748,22 @@ function buildBungalow(kind) {
     box(2.2, 0.45, 0.9, 18.6, floor + 0.28, 18.2, fabric, { tag: 'prop' });
     deco(2.2, 0.55, 0.26, 18.6, floor + 0.72, 17.9, fabric);
     box(1.2, 0.1, 0.6, 18.6, floor + 0.42, 19.8, mats.wood, { tag: 'prop' });
+    for (const lx of [-0.5, 0.5]) for (const lz of [-0.22, 0.22])
+        deco(0.08, 0.38, 0.08, 18.6 + lx, floor + 0.19, 19.8 + lz, mats.wood, { cast: false });
     deco(3.0, 0.02, 2.2, 18.6, floor + 0.012, 19.2, mats.carpet, { cast: false });
     box(1.5, 0.35, 2.1, 25.2, floor + 0.2, 19.4, mats.wood, { tag: 'prop' });
     deco(1.45, 0.22, 2.0, 25.2, floor + 0.48, 19.4, M.plain(0xcfc7b4, 0.9, 0));
     box(1.6, 0.9, 0.55, 23.0, floor + 0.45, 25.2, mats.wood, { tag: 'prop' });
     box(0.85, 0.85, 0.85, 17.0, floor + 0.42, 24.6, mats.wood, { tag: 'prop' });
     box(0.7, 0.7, 0.7, 17.1, floor + 1.2, 24.5, mats.wood, { tag: 'prop' });
+    // Three boards 0.6 apart against the wall read as a ladder with nothing to
+    // hold them, so they get two stiles from the ground past the top rung. The
+    // rungs sit between the stiles and the whole thing is now one object.
     for (let i = 0; i < 3; i++) deco(1.6, 0.06, 0.4, 25.4, 1.1 + i * 0.6, 24.4, mats.wood);
+    for (const sx2 of [24.72, 26.08]) {
+        deco(0.1, 2.86, 0.16, sx2, 1.43, 24.4, mats.wood);
+        deco(0.1, 0.12, 0.16, sx2, 0.06, 24.4, mats.dark, { cast: false });   // foot on the ground
+    }
     // emissive fixtures only — the point-light budget is spent on the two houses
     for (const [lx, lz] of [[18.6, 21.0], [24.4, 21.0]]) {
         deco(0.36, 0.1, 0.36, lx, top - 0.12, lz, M.plain(0xfff0d0, 0.6, 0), { cast: false });
@@ -863,6 +885,13 @@ function fireStation() {
         reel.position.set(sx * 10.2, 1.9, -27.5);
         reel.rotation.y = Math.PI / 2;
         reel.castShadow = true;
+        // A bracket, or the reel is a red ring floating a metre off the wall.
+        CTX.scene.add((() => {
+            const b = new THREE.Mesh(new THREE.BoxGeometry(0.14, 0.5, 0.5), M.plain(0x76706a, 0.6, 0.5));
+            b.position.set(sx * 10.34, 1.9, -27.5);
+            b.castShadow = true;
+            return b;
+        })());
         CTX.scene.add(reel);
     }
     const l = new THREE.PointLight(0xffe0b4, 60, 30, 2);
@@ -1150,7 +1179,11 @@ function nuketownSign() {
     printed.rotation.y = -Math.PI / 2;
     CTX.scene.add(printed);
 
-    CTX.cw.addAABB(8.0, 0, 27.0, 8.4, 5.0, 33.0, 'sign');
+    // Only the board itself. It used to be a wall-sized box from the ground up,
+    // which is why you could not walk under the sign even though the bottom of it
+    // is two metres over your head: the posts are decoration and nothing leans on
+    // them, so a soldier can pass between them.
+    CTX.cw.addAABB(8.0, 1.9, 27.0, 8.4, 4.9, 33.0, 'sign');
     for (const oz of [27.6, 32.4]) cylinder(0.15, 0.17, 5.4, 8, 8.2, 2.7, oz, M.wood(), { solid: false });
 }
 

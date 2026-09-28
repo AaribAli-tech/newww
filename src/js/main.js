@@ -61,6 +61,20 @@ let fpsAccum = 0, fpsFrames = 0;
 let respawnTimer = 0;
 let roamTicks = 0;                 // how many frames the roam camera has been asked for
 let glLost = false;                // set by the canvas' webglcontextlost handler
+
+// ── safe graphics ───────────────────────────────────────────────────────────
+// Chrome takes a WebGL context away for a driver reset, a full GPU or a
+// blacklisted driver — the same machine plays fine at reduced cost. So the FIRST
+// loss in a session reloads the tab once by itself, with shadows, post and the
+// resolution cap dropped; a second loss stops and explains. Both flags live in
+// sessionStorage, so closing the tab restores full quality without anyone having
+// to find a switch, and a machine that genuinely cannot run the game is told so
+// instead of being quietly degraded forever.
+const SAFE_GFX_KEY = 'nuke.safegfx';
+const GFX_LOSS_KEY = 'nuke.gfxloss';
+let safeGfx = false;
+function readFlag(k) { try { return sessionStorage.getItem(k) === '1'; } catch (e) { return false; } }
+function writeFlag(k, v) { try { sessionStorage.setItem(k, v ? '1' : '0'); } catch (e) {} }
 // Chained kills (double/triple/multi) and the streak-name ladder. Kept out here
 // rather than on Player so the death/respawn paths can clear them together.
 const killChain = new KillChain();
@@ -167,10 +181,20 @@ const _v = new THREE.Vector3();
 
 // A missing GPU blocklist entry or a disabled "hardware acceleration" flag used to
 // mean an eternal loading bar. Say what is wrong instead.
+/**
+ * One throwaway context, given straight back. Handing it back matters: on a GPU
+ * that is already at Chrome's context limit, the probe is the second context and
+ * the real renderer is the third — so the failure the player was told about was
+ * caused by the test that was supposed to prevent it.
+ */
 function webglSupported() {
     try {
         const c = document.createElement('canvas');
-        return !!(c.getContext('webgl2') || c.getContext('webgl'));
+        const gl = c.getContext('webgl2') || c.getContext('webgl') || c.getContext('experimental-webgl');
+        if (!gl) return false;
+        const lose = gl.getExtension('WEBGL_lose_context');
+        if (lose) lose.loseContext();
+        return true;
     } catch {
         return false;
     }
@@ -195,11 +219,17 @@ function showBootError(title, detail, retry = true) {
 
 // ── boot ────────────────────────────────────────────────────────────────────
 async function boot() {
+    safeGfx = readFlag(SAFE_GFX_KEY);
     if (!webglSupported()) {
         showBootError(
             'WebGL is unavailable',
-            'This browser or device cannot render 3D. Try Chrome, Edge or Firefox on a ' +
-            'laptop or desktop, and make sure hardware acceleration is enabled in the browser settings.'
+            'This browser cannot give the page a 3D context. Four things fix it, in the order '
+            + 'they usually work: close the other tabs of this game (each one holds a graphics '
+            + 'context), turn on hardware acceleration in settings and restart the browser, '
+            + 'check that your driver did not just update, and try Chrome or Edge if you are on '
+            + 'something else. Nothing you do to your computer is needed to play — reload and '
+            + 'it will try again.',
+            true
         );
         return;
     }
@@ -311,10 +341,26 @@ function releaseCursor() {
 }
 
 function setupRenderer() {
-    renderer = new THREE.WebGLRenderer({ canvas, antialias: false, powerPreference: 'high-performance', stencil: false });
+    try {
+        renderer = new THREE.WebGLRenderer({
+            canvas, antialias: false, stencil: false,
+            // 'high-performance' asks for the discrete GPU. On a machine that is
+            // already losing contexts, the request is a nudge towards the driver
+            // that dropped it, so in safe mode the browser chooses.
+            powerPreference: safeGfx ? 'default' : 'high-performance'
+        });
+    } catch (err) {
+        showBootError('The browser refused to give this page a 3D canvas',
+            'The graphics driver threw the request out rather than answering it: '
+            + String((err && err.message) || err)
+            + '. Close the other tabs of this game and reload — a full quality pass is worth waiting for.');
+        const e = new Error('webgl refused');
+        e.handled = true;
+        throw e;
+    }
     renderer.setSize(window.innerWidth, window.innerHeight);
-    renderer.setPixelRatio(curDpr);
-    renderer.shadowMap.enabled = true;
+    renderer.setPixelRatio(safeGfx ? 1.0 : curDpr);
+    renderer.shadowMap.enabled = !safeGfx;
     renderer.shadowMap.type = THREE.PCFSoftShadowMap;
     renderer.toneMapping = THREE.ACESFilmicToneMapping;
     renderer.toneMappingExposure = 0.92;
@@ -342,9 +388,22 @@ function setupRenderer() {
     canvas.addEventListener('webglcontextlost', e => {
         e.preventDefault();
         glLost = true;
+        releaseCursor();
+        if (!readFlag(SAFE_GFX_KEY) && !readFlag(GFX_LOSS_KEY)) {
+            writeFlag(GFX_LOSS_KEY, true);
+            writeFlag(SAFE_GFX_KEY, true);
+            showBootError('Recovering in safe graphics mode',
+                'Chrome took the 3D context away — a driver reset, or the GPU being full. '
+                + 'This tab is reloading itself once with the expensive parts switched off: '
+                + 'shadows, post-processing and the resolution cap. Close the tab afterwards '
+                + 'and the game comes back at full quality.', false);
+            setTimeout(() => location.reload(), 2600);
+            return;
+        }
         showBootError('The graphics driver dropped this tab',
-            'Chrome lost the WebGL context, usually after a driver reset or the GPU running out of memory. '
-            + 'Reload to play again — your settings and sensitivity are saved.');
+            'This tab has already come back once in safe graphics mode and the driver let go again. '
+            + 'That usually means the GPU itself is short of memory: close other 3D or video tabs, '
+            + 'and reload this one. Your settings, sensitivity and callsign are saved.');
     }, false);
     canvas.addEventListener('webglcontextrestored', () => {
         // three.js cannot rebuild what it had already uploaded, so the honest
@@ -519,6 +578,16 @@ function setupPost() {
     // first match, whatever you typed.
     applyCallsign(settings.name);
     applyQuality();
+    if (safeGfx) {
+        // Deliberately not saved. The saved profile still says what the player
+        // chose; this tab is only borrowing the cheap settings to stay alive.
+        renderer.shadowMap.enabled = false;
+        if (typeof sun !== 'undefined' && sun) sun.castShadow = false;
+        if (composerFX && composerFX.setQuality) composerFX.setQuality(0);
+        maxDpr = 1.0;
+        curDpr = 1.0;
+        renderer.setPixelRatio(1.0);
+    }
     if (player) {
         player.sensitivity = 0.0016 * settings.sens;
         player.baseFov = settings.fov;
@@ -802,7 +871,10 @@ function adaptResolution(dt) {
     // spare. Step the preset back up so a capable machine is not left on Low
     // forever. Needs a sustained stretch of easy frames, and a long cooldown,
     // so this cannot ping-pong against the rule above.
-    if (!autoQualityLocked && curDpr >= maxDpr - 1e-6 && frameAvg < 11 && settings.quality < QUALITY.length - 1) {
+    // The ladder is allowed to make this tab cheaper, never dearer: in safe mode
+    // a quiet stretch of frames is not a licence to ask the driver for the
+    // shadows back.
+    if (!safeGfx && !autoQualityLocked && curDpr >= maxDpr - 1e-6 && frameAvg < 11 && settings.quality < QUALITY.length - 1) {
         qualityHeadroom += dprCooldownStep;
         if (qualityHeadroom > 8) {
             settings.quality++;
@@ -1382,5 +1454,6 @@ void MAP_BOUNDS; void SPAWN_B; void WEAPON_DEFS; void TEAM_B;
 
 boot().catch(err => {
     console.error('[boot]', err);
+    if (err && err.handled) return;       // the card is already up, with the right words on it
     showBootError('The game could not start', String((err && err.message) || err));
 });

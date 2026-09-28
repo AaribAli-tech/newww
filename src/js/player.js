@@ -11,6 +11,9 @@ import {
 import { SOFT_COVER } from './physics.js';
 
 const EYE_STAND = 1.62, EYE_CROUCH = 1.02;
+// Half a head, not half a body: the headroom probe must not be answered by a
+// wall that only starts beside your shoulders.
+const HEAD_RADIUS = 0.2;
 const MAX_DELTA = 180;                       // px per event — spike guard
 const PITCH_LIMIT = Math.PI * 0.49;
 const _v = new THREE.Vector3(), _v2 = new THREE.Vector3(), _v3 = new THREE.Vector3();
@@ -98,7 +101,12 @@ export class Player {
             this.keys[e.code] = true;
             if (e.code === 'Tab') e.preventDefault();
             if (!this.alive) return;
-            if (e.code === 'KeyC') this.isCrouching = !this.isCrouching;
+            // `!e.repeat` matters more than it looks. Windows sends key repeat at
+            // thirty a second, so holding C flipped the flag all the way through
+            // the hold and left you wherever the last flip landed — half the time
+            // crouched, with the key doing nothing more, which is exactly what
+            // "I can't crouch back up" felt like.
+            if (e.code === 'KeyC' && !e.repeat) this.isCrouching = !this.isCrouching;
             if (e.code === 'KeyR') this.startReload();
             if (e.code === 'Digit1') this.useSlot(0);
             if (e.code === 'Digit2') this.useSlot(1);
@@ -542,11 +550,22 @@ export class Player {
             }
         }
 
-        // crouch blend, with a headroom check before standing back up
+        // Crouch blend. Standing up is refused only where the head genuinely does
+        // not fit, and the probe starts above the CROUCHED head: measuring from
+        // the waist let the surface you are standing on answer as a ceiling, the
+        // check failed, and it then wrote `isCrouching = true` over your own
+        // toggle — so a player under a doorframe was locked crouched for good and
+        // the key did nothing. The eye height is the thing that changes; whether
+        // you are crouching stays your decision.
         let targetEye = this.isCrouching ? EYE_CROUCH : EYE_STAND;
+        this.headroomBlocked = false;
         if (!this.isCrouching) {
-            const ceil = this.cw.ceilingHeight(this.position.x, this.position.z, this.position.y + 0.4, this.radius);
-            if (ceil < this.position.y + EYE_STAND + 0.15) { targetEye = EYE_CROUCH; this.isCrouching = true; }
+            const ceil = this.cw.ceilingHeight(this.position.x, this.position.z,
+                this.position.y + EYE_CROUCH, HEAD_RADIUS);
+            if (Number.isFinite(ceil) && ceil < this.position.y + EYE_STAND + 0.05) {
+                targetEye = EYE_CROUCH;
+                this.headroomBlocked = true;
+            }
         }
         this.eyeHeight = targetEye;
         this.currentEye += (targetEye - this.currentEye) * Math.min(1, dt * 12);

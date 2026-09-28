@@ -1264,5 +1264,138 @@ group('the punch list — menus, mouse, callsign, cover and room to roam');
     ok('quitting is the one red thing in the menu', /#btnQuit\{color:#F0B7B7/.test(html));
 }
 
+
+// ── 16. this pass: standing back up, the driver, and the furniture ──────────
+// Three reports, all of them the kind that make a game feel broken rather than
+// hard: you press crouch and stay crouched; the tab dies with a driver error and
+// comes back dead; and the inside of every house is shelves and tables hanging in
+// mid-air. The last one is settled by measuring the built map, not by reading
+// the source, because "floating" is a property of the geometry.
+group('crouch, the graphics driver, and nothing floating');
+{
+    const ply = await readFile(new URL('../src/js/player.js', import.meta.url), 'utf8');
+    const mj = await readFile(new URL('../src/js/main.js', import.meta.url), 'utf8');
+    const map = await readFile(new URL('../src/js/map.js', import.meta.url), 'utf8');
+
+    ok('a held crouch key is one crouch, not thirty',
+        /if \(e\.code === 'KeyC' && !e\.repeat\) this\.isCrouching = !this\.isCrouching;/.test(ply));
+    ok('the headroom probe starts above the crouched head, not at the waist',
+        /this\.position\.y \+ EYE_CROUCH, HEAD_RADIUS\)/.test(ply)
+        && /const HEAD_RADIUS = 0\.2;/.test(ply)
+        && !/this\.position\.y \+ 0\.4, this\.radius\)/.test(ply));
+    ok('and a low ceiling refuses the eye height, it never rewrites your own toggle',
+        /this\.headroomBlocked = true;/.test(ply)
+        && !/if \(ceil < this\.position\.y \+ EYE_STAND \+ 0\.15\) \{ targetEye = EYE_CROUCH; this\.isCrouching = true; \}/.test(ply));
+
+    ok('the WebGL probe gives its context straight back',
+        /const lose = gl\.getExtension\('WEBGL_lose_context'\);\s*if \(lose\) lose\.loseContext\(\);/.test(mj));
+    ok('building the renderer is inside a try, and the card that follows is the useful one',
+        /try \{\s*renderer = new THREE\.WebGLRenderer/.test(mj)
+        && /e\.handled = true;/.test(mj)
+        && /if \(err && err\.handled\) return;/.test(mj));
+    ok('the first dropped context reloads once, in safe graphics',
+        /writeFlag\(GFX_LOSS_KEY, true\);\s*writeFlag\(SAFE_GFX_KEY, true\);/.test(mj)
+        && /setTimeout\(\(\) => location\.reload\(\), 2600\)/.test(mj)
+        && /releaseCursor\(\);\s*if \(!readFlag\(SAFE_GFX_KEY\)/.test(mj));
+    ok('the second one stops and explains, and never reloads again',
+        (mj.match(/setTimeout\(\(\) => location\.reload\(\)/g) || []).length === 1
+        && /already come back once in safe graphics mode/.test(mj));
+    ok('safe graphics is borrowed for the tab only — nothing is written to the saved profile',
+        /renderer\.shadowMap\.enabled = !safeGfx;/.test(mj)
+        && /if \(composerFX && composerFX\.setQuality\) composerFX\.setQuality\(0\);/.test(mj)
+        && !/settings\.quality = 0/.test(mj));
+    ok('and the auto ladder may only go down while the tab is on safe graphics',
+        /if \(!safeGfx && !autoQualityLocked && curDpr >= maxDpr/.test(mj));
+
+    ok('the balcony opening is a window now, and the front door is the only way in',
+        /const balDoor = \[\{ a: -8\.1, b: -5\.8, y0: 4\.15, y1: 5\.3 \}\];/.test(map)
+        && !/one leaf swung open over the deck/.test(map)
+        && /windowGlass\('z', -8\.1, -5\.8, 4\.15, 5\.3, x0, mats\);/.test(map));
+    ok('the welcome sign is a board on posts, not a wall from the ground up',
+        /CTX\.cw\.addAABB\(8\.0, 1\.9, 27\.0, 8\.4, 4\.9, 33\.0, 'sign'\);/.test(map));
+    ok('the chairs at the kitchen table have legs',
+        (map.match(/deco\(0\.07, 0\.41, 0\.07, 22\.0 \+ lx, F \+ 0\.205, oz \+ lz/mg) || []).length === 1
+        && /for \(const lx of \[-0\.17, 0\.17\]\) for \(const lz of \[-0\.17, 0\.17\]\)/.test(map));
+    ok('so does the bungalow coffee table',
+        /for \(const lx of \[-0\.5, 0\.5\]\) for \(const lz of \[-0\.22, 0\.22\]\)\n\s*deco\(0\.08, 0\.38, 0\.08, 18\.6 \+ lx, floor \+ 0\.19, 19\.8 \+ lz/.test(map));
+    ok('the wall ladder has stiles to the ground and the shelves have posts',
+        /for \(const sx2 of \[24\.72, 26\.08\]\)/.test(map)
+        && /deco\(0\.1, 2\.86, 0\.16, sx2, 1\.43, 24\.4, mats\.wood\);/.test(map)
+        && /for \(const oz2 of \[cz - 1\.45, cz \+ 0\.65\]\)/.test(map));
+    ok('and the firehouse hose reel is bolted to something',
+        /new THREE\.BoxGeometry\(0\.14, 0\.5, 0\.5\)/.test(map));
+
+    // The real test. Not the source text: the built scene, measured. Each of
+    // these pieces was put into the town with the size and count below, so if
+    // somebody deletes a leg again the number moves and this says so.
+    const { CollisionWorld } = await import('../src/js/physics.js');
+    const mapMod = await import('../src/js/map.js');
+    const THREE0 = await import('three');
+    const { MAP_SCALE } = await import('../src/js/utils.js');
+    const scene = new THREE0.Scene();
+    const cwx = new CollisionWorld();
+    mapMod.buildNuketown(scene, cwx);
+    const sz = new THREE0.Vector3();
+    const bb = new THREE0.Box3();
+    // Counted near the furniture it belongs to, because a leg the same size as
+    // somebody else's leg is not evidence. Every position is authored metres, and
+    // both mirrorings are listed.
+    const countNear = (w, h, d, spots, r = 0.9, tol = 0.03) => {
+        let n = 0;
+        scene.traverse(o => {
+            if (!o.isMesh || !o.geometry) return;
+            bb.setFromObject(o);
+            bb.getSize(sz);
+            if (Math.abs(sz.x / MAP_SCALE - w) > tol || Math.abs(sz.y / MAP_SCALE - h) > tol
+                || Math.abs(sz.z / MAP_SCALE - d) > tol) return;
+            const cx = (bb.min.x + bb.max.x) / 2 / MAP_SCALE, cz = (bb.min.z + bb.max.z) / 2 / MAP_SCALE;
+            if (!spots.length || spots.some(([px, pz]) => Math.hypot(cx - px, cz - pz) < r)) n++;
+        });
+        return n;
+    };
+    const chairSpots = [[22.0, -4.8], [22.0, -3.6], [-22.0, -4.8], [-22.0, -3.6]];
+    const tableSpots = [[21.0, -6.9], [18.6, 19.8], [-21.0, -6.9], [-18.6, 19.8]];
+    // Two houses, two chairs each, four legs a chair: sixteen.
+    ok('the kitchen chairs stand on four legs each, in both houses', countNear(0.07, 0.41, 0.07, chairSpots, 0.45) === 16,
+        `${countNear(0.07, 0.41, 0.07, chairSpots, 0.45)} legs at the tables`);
+    ok('both coffee tables have their four legs', countNear(0.08, 0.38, 0.08, tableSpots, 0.95) === 16,
+        `${countNear(0.08, 0.38, 0.08, tableSpots, 0.95)} legs by the tables`);
+    ok('the wall ladders have stiles that reach the ground', countNear(0.1, 2.86, 0.16, [[25.4, 24.4], [-25.4, 24.4]], 1.2) === 4,
+        `${countNear(0.1, 2.86, 0.16, [[25.4, 24.4], [-25.4, 24.4]], 1.2)} stiles`);
+    ok('and the garage shelves stand on two posts each', countNear(0.09, 2.7, 0.09, [], 0) === 4,
+        `${countNear(0.09, 2.7, 0.09, [], 0)} posts of that size in the town — two per garage, and that size is used for nothing else`);
+    ok('every piece of furniture with a collider still has something under it', (() => {
+        // Returns true, or a description. `ok` prints whichever it is, so a
+        // failure here names the exact box instead of just saying 3.
+        const bad = [];
+        for (const b of cwx.boxes) {
+            if (b.tag !== 'prop' && b.tag !== 'cover') continue;
+            if ((b.maxY - b.minY) > 0.45 * MAP_SCALE || b.minY < 0.06) continue;
+            let held = false;
+            for (const o of cwx.boxes) {
+                if (o === b || o.tag === 'bound' || o.tag === 'ground') continue;
+                if (b.maxX <= o.minX + 0.05 || b.minX >= o.maxX - 0.05) continue;
+                if (b.maxZ <= o.minZ + 0.05 || b.minZ >= o.maxZ - 0.05) continue;
+                if (o.maxY >= b.minY - 0.06 && o.maxY <= b.minY + 0.30) { held = true; break; }
+            }
+            if (!held) {
+                // legs and stiles are decoration, so they are not in the collider
+                // table: look for a mesh the same size as a leg under a corner.
+                scene.traverse(o => {
+                    if (!o.isMesh || !o.geometry || held) return;
+                    bb.setFromObject(o);
+                    if (bb.maxY > b.minY + 0.08 || bb.maxY < b.minY - 0.25) return;
+                    if (bb.maxX < b.minX - 0.2 || bb.minX > b.maxX + 0.2) return;
+                    if (bb.maxZ < b.minZ - 0.2 || bb.minZ > b.maxZ + 0.2) return;
+                    if ((bb.maxY - bb.minY) > 0.05) held = true;
+                });
+            }
+            if (!held) bad.push(`${b.tag} at ${(b.minX / MAP_SCALE).toFixed(1)},${(b.minZ / MAP_SCALE).toFixed(1)} y${(b.minY / MAP_SCALE).toFixed(2)}`);
+        }
+        return bad.length === 0 ? true : (bad.slice(0, 4).join(' · ') + ` — ${bad.length} unsupported`);
+    })());
+
+}
+
 console.log(`\n${fail === 0 ? '✓' : '✗'} ${pass} passed, ${fail} failed\n`);
 process.exit(fail === 0 ? 0 : 1);
