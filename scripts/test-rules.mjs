@@ -766,9 +766,11 @@ group('utils.js — the perimeter is a clamp, not a mesh');
         && Math.abs(U.MAP_RECT.minZ + 40 * U.MAP_SCALE) < 1e-9
         && Math.abs(U.MAP_RECT.minX + 42 * U.MAP_SCALE) < 1e-9
         && Math.abs(U.MAP_RECT.maxZ - 38 * U.MAP_SCALE) < 1e-9);
-    ok('and the map is 45% more ground than the 84 × 78 it was authored at',
-        Math.abs(U.MAP_SCALE - 1.45) < 1e-9, `${U.MAP_RECT.maxX - U.MAP_RECT.minX} × ${U.MAP_RECT.maxZ - U.MAP_RECT.minZ} m`);
-    const p = { x: 61.3, y: 0, z: -900 };
+    ok('and the map is 45% more ground, then 25% more on top of that',
+        Math.abs(U.MAP_SCALE - 1.45 * 1.25) < 1e-9
+        && (U.MAP_RECT.maxX - U.MAP_RECT.minX) > 84 * 1.7 && (U.MAP_RECT.maxZ - U.MAP_RECT.minZ) > 78 * 1.7,
+        `${U.MAP_RECT.maxX - U.MAP_RECT.minX} × ${U.MAP_RECT.maxZ - U.MAP_RECT.minZ} m of roamable ground`);
+    const p = { x: 600, y: 0, z: -900 };
     ok('a runaway position is pulled back inside', U.clampToMap(p, 2.0) === true
         && p.x === U.MAP_RECT.maxX - 2 && p.z === U.MAP_RECT.minZ + 2, JSON.stringify(p));
     ok('and an in-bounds position is left completely alone',
@@ -941,7 +943,12 @@ group('map scale — geometry, collision, tables and textures move together');
     const hud = await readFile(new URL('../src/js/hud.js', import.meta.url), 'utf8');
 
     ok('one constant decides the size of the world',
-        /export const MAP_SCALE = 1\.45;/.test(await readFile(new URL('../src/js/utils.js', import.meta.url), 'utf8')));
+        await (async () => {
+            const u = await readFile(new URL('../src/js/utils.js', import.meta.url), 'utf8');
+            const m = u.match(/export const MAP_SCALE = ([0-9.]+);/g) || [];
+            return m.length === 1 && Number(m[0].match(/([0-9.]+);/)[1]) === U.MAP_SCALE
+                && (u.match(/MAP_SCALE = /g) || []).length === 1;
+            })(), 'one declaration, and the rule reads the same number the game does');
     ok('the build applies it once, at the end, before anything is validated',
         map.indexOf('applyWorldScale(scene, cw, MAP_SCALE, sky.mesh)') < map.indexOf('validateWaypoints(cw);'),
         'order matters — nodes are checked against the scaled colliders');
@@ -990,7 +997,9 @@ group('map scale — geometry, collision, tables and textures move together');
     ok('the fog reaches across the wider ground',
         /new THREE\.Fog\(0xcfc4ac, 110 \* MAP_SCALE, 360 \* MAP_SCALE\)/.test(mj));
     ok('the UAV orbit grows with the block it is watching',
-        /Math\.cos\(ang\) \* 62 \* MAP_SCALE/.test(ks) && /Math\.sin\(ang\) \* 48 \* MAP_SCALE/.test(ks));
+        /Math\.cos\(ang\) \* 40 \* MAP_SCALE/.test(ks) && /Math\.sin\(ang\) \* 30 \* MAP_SCALE/.test(ks)
+        && 40 * U.MAP_SCALE > 62 && 30 * U.MAP_SCALE > 48,
+        'the drone crosses the streets, not the far side of the wire');
     ok('the camera still sees past the far house',
         /new THREE\.PerspectiveCamera\(78,[^)]*,\s*(\d+)\)/.test(mj)
         && Number(RegExp.$1) > 360 * U.MAP_SCALE, 'far plane vs fog');
@@ -1234,12 +1243,16 @@ group('the punch list — menus, mouse, callsign, cover and room to roam');
     ok('the deploy takes the candidate furthest from everyone already placed',
         /const sp = farthestSpawn\(onA \? TEAM_A : TEAM_B, onA \? takenA : takenB, \(onA \? ia : ib\)\);/.test(modes)
         && /if \(onA\) takenA\.push\(sp\); else takenB\.push\(sp\);/.test(modes));
-    ok("the bots' patrol ring grew with the ground it patrols", (() => {
-        const ring = WAYPOINTS.filter(w => Math.hypot(w.x, w.z) > 18 && Math.hypot(w.x, w.z) < 25);
+    ok("the bots' patrol ring grew with the ground it patrols", await (async () => {
+        const { MAP_SCALE: MS } = await import('../src/js/utils.js');
+        const ring = WAYPOINTS.filter(w => Math.hypot(w.x, w.z) > 18 * MS && Math.hypot(w.x, w.z) < 25 * MS);
         return ring.length >= 8;
     })(), `${WAYPOINTS.filter(w => Math.hypot(w.x, w.z) > 18 && Math.hypot(w.x, w.z) < 25).length} nodes in the grown ring`);
     ok('the spawn lists speak the scaled metres, not the authored ones',
-        Math.abs(SPAWN_A[0].x) > 34 && Math.abs(SPAWN_A[0].x) < 62, `first candidate at x ${SPAWN_A[0].x}`);
+        await (async () => {
+            const { MAP_SCALE: MS } = await import('../src/js/utils.js');
+            return Math.abs(SPAWN_A[0].x) > 30 * MS && Math.abs(SPAWN_A[0].x) < 45 * MS;
+        })(), `first candidate at x ${SPAWN_A[0].x} — deployed out past the old fence line`);
 
     // 10 — the tester page is out, and the game keeps its own soldiers.
     ok('the model tester is gone from the tree, the scripts and the routes',
@@ -1308,9 +1321,15 @@ group('crouch, the graphics driver, and nothing floating');
         /if \(!safeGfx && !autoQualityLocked && curDpr >= maxDpr/.test(mj));
 
     ok('the balcony opening is a window now, and the front door is the only way in',
-        /const balDoor = \[\{ a: -8\.1, b: -5\.8, y0: 4\.15, y1: 5\.3 \}\];/.test(map)
-        && !/one leaf swung open over the deck/.test(map)
-        && /windowGlass\('z', -8\.1, -5\.8, 4\.15, 5\.3, x0, mats\);/.test(map));
+        /const balDoor = \[\];/.test(map)
+        && !/windowGlass\('z', -8\.1, -5\.8, 4\.15, 5\.3, x0, mats\);/.test(map)
+        && !/windowGlass\('x', 23\.2, 24\.8/.test(map)
+        && /deco\(0\.1, 1\.6, 0\.2, 23\.15, 4\.35, z1 \+ 0\.11, mats\.trim/.test(map)
+        && /deco\(1\.7, 0\.12, 0\.24, 24\.0, 3\.5, z1 \+ 0\.13, mats\.trim/.test(map)
+        && /deco\(0\.2, 0\.3, 2\.9, x0 - 0\.11, zy, -6\.95/.test(map)
+        && !/z1 \+ 0\.06, mats\.trim/.test(map)
+        && !/one leaf swung open over the deck/.test(map),
+        'the door is bricked over, the roof route stays walkable, and its surround is flush');
     ok('the welcome sign is a board on posts, not a wall from the ground up',
         /CTX\.cw\.addAABB\(8\.0, 1\.9, 27\.0, 8\.4, 4\.9, 33\.0, 'sign'\);/.test(map));
     ok('the chairs at the kitchen table have legs',
@@ -1368,6 +1387,130 @@ group('crouch, the graphics driver, and nothing floating');
         `${countNear(0.08, 0.38, 0.08, tableSpots, 0.95)} legs by the tables`);
     ok('the wall ladders have stiles that reach the ground', countNear(0.1, 2.86, 0.16, [[25.4, 24.4], [-25.4, 24.4]], 1.2) === 4,
         `${countNear(0.1, 2.86, 0.16, [[25.4, 24.4], [-25.4, 24.4]], 1.2)} stiles`);
+    const balBand = () => cwx.boxes.filter(b => b.tag === 'solid'
+        && Math.abs(Math.abs((b.minX + b.maxX) / 2) / MAP_SCALE - 18) < 0.2
+        && b.minZ / MAP_SCALE <= -8.05 && b.maxZ / MAP_SCALE >= -5.85
+        && b.minY / MAP_SCALE <= 4.15 && b.maxY / MAP_SCALE >= 5.3);
+    ok('the balcony stair door is brick: a wall stands where the opening was, both houses',
+        balBand().length >= 2, `${balBand().length} collider boxes across the old doorway`);
+    ok('and nothing glazes it, so there is no fake door left to walk into',
+        countNear(1.66, 1.15, 0.04, [[18, -6.95], [-18, -6.95]], 1.2) === 0);
+    // Trim relief, measured: a moulding must stand a little off the face it belongs
+    // to AND reach into it. 0 proud = invisible, >0.12 proud = a board on nothing.
+    const trimCount = (w, h, d, protrudeOf) => {
+        let n = 0, bad = 0;
+        scene.traverse(o => {
+            if (!o.isMesh || !o.geometry) return;
+            bb.setFromObject(o); bb.getSize(sz);
+            if (Math.abs(sz.x / MAP_SCALE - w) > 0.03 || Math.abs(sz.y / MAP_SCALE - h) > 0.03
+                || Math.abs(sz.z / MAP_SCALE - d) > 0.03) return;
+            const pr = protrudeOf(bb, sz);
+            if (pr === null) return;
+            if (pr >= 0.02 && pr <= 0.13) n++; else bad++;
+        });
+        return { n, bad };
+    };
+    // 0.16 is half the wall thickness; the faces are 0.16 either side of the plane.
+    const atRoof = bb => bb.min.y / MAP_SCALE > 3 && bb.max.y / MAP_SCALE < 5.6
+        && Math.abs((bb.min.x + bb.max.x) / 2 / MAP_SCALE) > 22.9 && Math.abs((bb.min.x + bb.max.x) / 2 / MAP_SCALE) < 25.1;
+    // Outside only: the roof wall faces +z on both lots, the balcony wall faces
+    // away from the street, which is -x on the east house and +x on the west one.
+    const proudZ = bb => bb.max.z / MAP_SCALE + 1.24;
+    const proudX = bb => ((bb.min.x + bb.max.x) / 2 > 0 ? 17.84 - bb.min.x / MAP_SCALE : bb.max.x / MAP_SCALE + 17.84);
+    const roofTrim = [trimCount(1.6, 0.1, 0.2, bb => atRoof(bb) ? proudZ(bb) : null),
+    trimCount(0.1, 1.6, 0.2, bb => atRoof(bb) ? proudZ(bb) : null),
+    trimCount(1.7, 0.12, 0.24, bb => atRoof(bb) ? proudZ(bb) : null)];
+    ok('the garage-roof window surround stands a little off the brick and bites into it',
+        roofTrim[0].n === 2 && roofTrim[1].n === 4 && roofTrim[2].n === 2
+        && roofTrim.every(r => r.bad === 0),
+        `${roofTrim.map(r => r.n).join('/')} pieces at 2–13 cm relief, ${roofTrim.reduce((a, r) => a + r.bad, 0)} floating or buried`);
+    const balTrim = trimCount(0.2, 0.3, 2.9, bb => (bb.min.y / MAP_SCALE > 3.5 && bb.max.y / MAP_SCALE < 5.6
+        && bb.min.z / MAP_SCALE < -6 && bb.max.z / MAP_SCALE > -8) ? proudX(bb) : null);
+    ok('and the four battens over the old balcony door are on the wall, not off it',
+        balTrim.n === 8 && balTrim.bad === 0,
+        `${balTrim.n} battens flush on both houses, ${balTrim.bad} floating or buried`);
+    ok('a car keeps its tyres under its own body — the offsets come off the body',
+        /const treadW = \(kind === 'jeep' \? 2\.0 : 1\.95\) \/ 2 - 0\.055;/.test(map)
+        && /wheel\(x \+ ow \* treadW, 0\.36, z \+ ol \* \(treadL \/ 1\.45\)/.test(map)
+        && !/wheel\(x \+ ol, 0\.36, z \+ ow \* 0\.92/.test(map), 'no typed-in track width that can drift from the shell');
+    ok('a streak key is bound in exactly one place, so one press is one strike', await (async () => {
+        const ply = await readFile(new URL('../src/js/player.js', import.meta.url), 'utf8');
+        const mj = await readFile(new URL('../src/js/main.js', import.meta.url), 'utf8');
+        const bound = id => (ply.match(new RegExp(`e\\.code === '${id}'[\\s\\S]{0,90}ctx\\.useStreak`)) || []).length;
+        return bound('KeyZ') === 1 && bound('KeyX') === 1 && bound('KeyV') === 1
+            && !/case 'Key[ZXV]':/.test(mj) && !/code === 'KeyZ'/.test(mj);
+    })(), 'Z, X and V each reach tryStreak once');
+
+    // Firing a streak calls audio, and the harness has no audio hardware, so node
+    // gets just enough of a WebAudio to let the effect code run to completion.
+    const stubAudio = () => {
+        if (globalThis.__audioStub) return;
+        globalThis.__audioStub = true;
+        // Any property of any node is another node: audio.js reaches straight
+        // through gain.frequency.setValueAtTime and param.value, and a shallow
+        // fake dies on the second hop.
+        const node = new Proxy(function () { }, {
+            get: (o, k) => (k === 'value' || k === 'defaultValue' || k === 'maxValue'
+                || k === 'minValue' || k === 'length' ? 1 : node),
+            apply: () => node, set: () => true, has: () => true,
+        });
+        class FakeCtx {
+            constructor() { this.currentTime = 0; this.sampleRate = 48000; this.state = 'running'; this.destination = node; this.listener = { setPosition() { }, positionX: { value: 0 } }; }
+            createGain() { return node; } createOscillator() { return node; } createBiquadFilter() { return node; }
+            createBufferSource() { return node; } createStereoPanner() { return node; } createDynamicsCompressor() { return node; }
+            createWaveShaper() { return node; } createConvolver() { return node; } createDelay() { return node; }
+            createPanner() { return node; } createChannelMerger() { return node; } createPeriodicWave() { return node; }
+            createBuffer(ch, len) { return { length: len, numberOfChannels: ch, sampleRate: 48000, getChannelData: () => new Float32Array(len) }; }
+            resume() { return Promise.resolve(); } close() { return Promise.resolve(); }
+        }
+        globalThis.AudioContext = FakeCtx;
+        globalThis.webkitAudioContext = FakeCtx;
+        if (!globalThis.window) globalThis.window = globalThis;
+        globalThis.window.AudioContext = FakeCtx;
+        globalThis.window.webkitAudioContext = FakeCtx;
+    };
+
+    // The airstrike used to fall in a fixed band around the middle of the street.
+    // This is the real test: call one from the far edge and measure where it lands.
+    ok('call in a strike from the edge of town and it comes to YOU, not to the middle', await (async () => {
+        stubAudio();
+        const { Killstreaks } = await import('../src/js/killstreaks.js');
+        const { MAP_SCALE: MS, MAP_RECT: MR } = await import('../src/js/utils.js');
+        const seen = [];
+        const ks = new Killstreaks({
+            player: { position: { x: MR.maxX - 12, z: -20 }, killStreak: 9, matchKills: 12, alive: true },
+            hud: { banner() { } }, scene: { add: o => seen.push(o), remove() { } },
+            getMode: () => null, effects: {}, audio: {}, getBots: () => [],
+        });
+        if (!ks.canUse('air')) return false;
+        if (!ks.use('air')) return false;
+        const jets = ks.active.filter(a => a.kind === 'jet');
+        if (!jets.length) return false;
+        const mid = (jets[0].dropFrom + jets[0].dropTo) / 2;
+        return Math.abs(mid - (MR.maxX - 12)) < 34 && Math.abs((jets[0].dropTo - jets[0].dropFrom) / 2 - 26 * MS) < 1e-6
+            && Math.abs(jets[0].obj.position.x - mid) > 26 * MS;
+    })(), 'the bomb lane is centred on the caller and as wide as the grown map');
+    ok('three kills is no airstrike, four is a UAV, and the UAV is spent until you die', await (async () => {
+        stubAudio();
+        const { Killstreaks } = await import('../src/js/killstreaks.js');
+        const mk = kills => {
+            const ks = new Killstreaks({
+                player: { position: { x: 0, z: 0 }, killStreak: kills, matchKills: kills, alive: true },
+                hud: { banner() { } }, scene: { add() { }, remove() { } },
+                getMode: () => null, effects: {}, audio: {}, getBots: () => [],
+            });
+            return ks;
+        };
+        const three = mk(3), four = mk(4);
+        if (three.progress('uav').ready) return false;
+        if (!four.progress('uav').ready) return false;
+        if (four.progress('air').ready) return false;
+        if (!four.use('uav')) return false;
+        if (four.use('uav')) return false;
+        if (four.progress('uav').ready) return false;
+        four.onPlayerDeath();
+        return four.progress('uav').ready === true && four.use('uav') === true;
+    })());
     ok('the garage rack stands on two full-height end panels, one per side', countNear(0.6, 2.57, 0.1, [], 0) === 4,
         `${countNear(0.6, 2.57, 0.1, [], 0)} panels — two per garage, from the floor to the top board`);
     {

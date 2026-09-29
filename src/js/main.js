@@ -10,7 +10,7 @@ import { Bot, claimPoint, deploySpread, resetDeploySpread } from './ai.js';
 import { HUD } from './hud.js';
 import { loadRebel, rebelInfo, setRebelMode } from './rebel.js';
 import { Effects } from './effects.js';
-import { Killstreaks } from './killstreaks.js';
+import { Killstreaks, STREAKS } from './killstreaks.js';
 import { KillChain, milestoneFor, milestoneProgress } from './medals.js';
 import { createMode, MODES } from './modes.js';
 import { selectedMode as pickedMode, onModeChange } from './hud.js';

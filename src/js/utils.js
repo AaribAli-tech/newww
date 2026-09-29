@@ -21,7 +21,7 @@ export const dist2D = (a, b) => Math.hypot(a.x - b.x, a.z - b.z);
  * weapon ranges and bot skill, because 45% more ground is the point, and it is
  * meant to take 45% longer to cross it.
  */
-export const MAP_SCALE = 1.45;
+export const MAP_SCALE = 1.8125;
 
 /**
  * The footprint as it was authored, before the scale factor is applied. Anything

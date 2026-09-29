@@ -379,10 +379,10 @@ function buildHouse(kind) {
     // ── upper floor exterior walls ──
     const UWIN = { y0: 4.05, y1: 5.35 };
     // Was a door opening, 2.7 m tall, from the balcony deck straight into the
-    // upper front room. Closed up on request — the front door is the only way in
-    // to this house — and turned into a window, so the room keeps its light and
-    // the balcony stays a firing position instead of a second entrance.
-    const balDoor = [{ a: -8.1, b: -5.8, y0: 4.15, y1: 5.3 }];
+    // upper front room. Asked twice to close it: a window in the doorway was
+    // still an opening the bots pathed toward and shots came through, so it is
+    // siding now, boarded over. The front door is the way in and out.
+    const balDoor = [];        // walled up: see the note on the front door
     const upFrontWin = [{ a: -4.2, b: -2.8, ...UWIN }];
     const upBackWin = [{ a: -8.4, b: -7.0, ...UWIN }, { a: -3.6, b: -2.2, ...UWIN }];
     const upNorthWin = [{ a: 20.0, b: 21.4, ...UWIN }];
@@ -410,13 +410,21 @@ function buildHouse(kind) {
     windowGlass('x', 20.0, 21.4, UWIN.y0, UWIN.y1, z0, mats);
     // No pane in the garage-roof window: it is a traversal route, and glass you
     // walk through reads as a bug.
-    deco(1.6, 0.1, 0.2, 24.0, 5.2, z1 + 0.06, mats.trim, { cast: false });
-    deco(1.7, 0.12, 0.24, 24.0, 3.5, z1 + 0.06, mats.trim, { cast: false });
-    deco(0.1, 1.6, 0.2, 23.15, 4.35, z1 + 0.06, mats.trim, { cast: false });
-    deco(0.1, 1.6, 0.2, 24.85, 4.35, z1 + 0.06, mats.trim, { cast: false });
-    // The swung-open leaf is gone. What is left is a pane and its sill.
-    windowGlass('z', -8.1, -5.8, 4.15, 5.3, x0, mats);
-    deco(2.5, 0.1, 0.22, x0 - 0.12, 4.1, -6.95, mats.trim, { cast: false });
+    // Surround to the garage-roof window. It is an opening with no pane — a
+    // traversal route — and these four pieces are what makes the hole read as a
+    // window instead of damage. The wall is 0.32 thick and its outer face is 0.16
+    // out from z1, so these are set to stand 5 cm off that face and bite 17 cm into
+    // the brick: nothing hangs on air, nothing is buried where it cannot be seen.
+    // (They sat flush-to-invisible before, which is how "frames sticking out of the
+    // window" and "floating things not with the wall" both got reported.)
+    deco(1.6, 0.1, 0.2, 24.0, 5.2, z1 + 0.11, mats.trim, { cast: false });
+    deco(1.7, 0.12, 0.24, 24.0, 3.5, z1 + 0.13, mats.trim, { cast: false });
+    deco(0.1, 1.6, 0.2, 23.15, 4.35, z1 + 0.11, mats.trim, { cast: false });
+    deco(0.1, 1.6, 0.2, 24.85, 4.35, z1 + 0.11, mats.trim, { cast: false });
+    // Siding battens over the walled-up balcony door, on the same 5 cm relief,
+    // covering the whole width of the opening that used to be there.
+    for (const zy of [4.0, 4.35, 4.7, 5.05])
+        deco(0.2, 0.3, 2.9, x0 - 0.11, zy, -6.95, mats.siding, { cast: false });
 
     // ── upper divider + stairwell railing ──
     wallX(x0 + t / 2, 25.4, -4.9, midTop, top, 0.2, mats.paper, [{ a: 21.8, b: 23.6, y0: midTop, y1: 5.5 }]);
@@ -1100,6 +1108,10 @@ function movingTruck() {
 
 /** Driveway car. `axis` is the long axis of the body. */
 function car(x, z, color, kind, axis = 'z') {
+    // Tyre offsets are derived from the body they hang under, never typed in next to
+    // it: a body that changes width cannot then leave a wheel sitting in the grass.
+    const treadW = (kind === 'jeep' ? 2.0 : 1.95) / 2 - 0.055;
+    const treadL = (kind === 'jeep' ? 4.0 : 4.4) / 2 - 0.75;
     const body = M.paintedMetal('car' + color, color, 0.28);
     const glass = M.glassDirty();
     const chrome = M.plain(0xc8ccd0, 0.15, 0.95);
@@ -1124,9 +1136,9 @@ function car(x, z, color, kind, axis = 'z') {
         alongD(2.0, 0.14, 0.2, 0, 0.55, -2.2, chrome);
         alongD(2.0, 0.14, 0.2, 0, 0.55, 2.2, chrome);
     }
-    for (const ow of [-1, 1]) for (const ol of [-1.45, 1.45]) {
-        if (axis === 'x') wheel(x + ol, 0.36, z + ow * 0.92, 0.36, 0.24, 'z');
-        else wheel(x + ow * 0.92, 0.36, z + ol, 0.36, 0.24, 'x');
+    for (const ow of [-1, 1]) for (const ol of [-1.45, 1.45]) {   // ol is ±1.45 authored, scaled below
+        if (axis === 'x') wheel(x + ow * treadW, 0.36, z + ol * (treadL / 1.45), 0.36, 0.24, 'z');
+        else wheel(x + ow * treadW, 0.36, z + ol * (treadL / 1.45), 0.36, 0.24, 'x');
     }
 }
 
@@ -1831,7 +1843,7 @@ export const WAYPOINTS = atScale([
 const EAST_PERCHES = [
     { x: 16.8, y: 3.30, z: -6.8 },    // balcony, over the front door
     { x: 16.8, y: 3.30, z: -3.2 },    // balcony, south end
-    { x: 22.4, y: 3.30, z: -6.4 },    // upper front room, back from the balcony doors
+    { x: 22.4, y: 3.30, z: -6.4 },    // upper front room, back from the balcony window
     { x: 23.3, y: 3.46, z: 0.9 },     // garage roof, out of the upper window
     { x: 12.0, y: 6.28, z: -22.0 }    // fire station roof stair head
 ];

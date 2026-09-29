@@ -7,7 +7,7 @@
 // ============================================================================
 import * as THREE from 'three';
 import * as M from './materials.js';
-import { MAP_SCALE } from './utils.js';
+import { MAP_SCALE, MAP_RECT, clamp } from './utils.js';
 import { playUAV, playJetPass, playExplosion, playNukeSiren, playNukeBlast, duckAudio } from './audio.js';
 
 export const STREAKS = [
@@ -133,18 +133,30 @@ export class Killstreaks {
 
     // ── AIRSTRIKE ───────────────────────────────────────────────────────────
     _airstrike() {
-        this.ctx.hud.banner('AIRSTRIKE INBOUND', '#ffb02e', 'Danger close — stay off the street');
+        const p = this.ctx.player;
+        // The strike falls where the fight is. It used to be a fixed band from
+        // x -26 to 26 around the middle of the street, which was the whole map
+        // when the map was 84 m wide and is now a patch on a town the two teams
+        // are deployed 100 m across — call one in anywhere else and nothing
+        // happened near you, which is exactly what "the airstrike is not coming"
+        // describes. So the run is centred on the caller, and clamped back inside
+        // the fences so it cannot spend the whole stick on the empty lots.
+        const half = 26 * MAP_SCALE;
+        const px = clamp(p.position.x, MAP_RECT.minX + half * 0.55, MAP_RECT.maxX - half * 0.55);
+        const pz = clamp(p.position.z, MAP_RECT.minZ + 8, MAP_RECT.maxZ - 8);
+        this.ctx.hud.banner('AIRSTRIKE INBOUND', '#ffb02e', 'Danger close — keep moving');
         playJetPass();
         // two jets running down the street, bombs walking along X
         for (let j = 0; j < 2; j++) {
             const jet = makeJetModel();
-            const dirSign = this.ctx.player.position.x < 0 ? 1 : -1;
-            jet.position.set(-dirSign * 150, 46 + j * 6, (j === 0 ? -4 : 5));
+            const dirSign = px < 0 ? 1 : -1;
+            const lane = pz + (j === 0 ? -4 : 5);
+            jet.position.set(px - dirSign * (half + 70), 46 + j * 6, lane);
             jet.rotation.y = dirSign > 0 ? Math.PI / 2 : -Math.PI / 2;
             this.ctx.scene.add(jet);
             this.active.push({
                 kind: 'jet', obj: jet, t: -j * 0.55, dur: 5.0, speed: dirSign * 150,
-                dropFrom: -26, dropTo: 26, dropped: 0, lane: (j === 0 ? -4 : 5)
+                dropFrom: px - half, dropTo: px + half, dropped: 0, lane
             });
         }
     }
@@ -172,8 +184,11 @@ export class Killstreaks {
                 // An ellipse around the block, so the orbit has to grow with the block:
                 // a UAV circling the old footprint would spend the match over the same
                 // three houses while the rest of the map goes unwatched.
-                a.obj.position.set(Math.cos(ang) * 62 * MAP_SCALE,
-                    34 + Math.sin(ang * 2) * 3, Math.sin(ang) * 48 * MAP_SCALE);
+                // Tight enough that the drone passes over the streets rather than
+                // around the far side of the wire: at 62 m it spent the whole 30 s
+                // visible only if you stood at the fence and looked out of it.
+                a.obj.position.set(Math.cos(ang) * 40 * MAP_SCALE,
+                    34 + Math.sin(ang * 2) * 3, Math.sin(ang) * 30 * MAP_SCALE);
                 a.obj.rotation.y = -ang + Math.PI / 2;
                 a.obj.rotation.z = Math.sin(ang) * 0.25;
                 if (a.t >= a.dur) { this.ctx.scene.remove(a.obj); this.active.splice(i, 1); }
@@ -185,13 +200,17 @@ export class Killstreaks {
                 a.obj.position.x += a.speed * dt;
                 a.obj.position.y -= dt * 1.5;
                 // walk bombs down the street
+                // A band, not a symmetric pair: the run is centred wherever the
+                // caller was standing, so both ends have to be read as they are.
                 const x = a.obj.position.x;
-                const inZone = (a.speed > 0) ? (x > a.dropFrom && x < a.dropTo) : (x < -a.dropFrom && x > -a.dropTo);
+                const lo = Math.min(a.dropFrom, a.dropTo), hi = Math.max(a.dropFrom, a.dropTo);
+                const inZone = x > lo && x < hi;
                 if (inZone && a.dropped < 7 && Math.random() < dt * 12) {
                     a.dropped++;
                     this._dropBomb(x + (Math.random() - 0.5) * 4, a.lane + (Math.random() - 0.5) * 5);
                 }
-                if (Math.abs(a.obj.position.x) > 170) { this.ctx.scene.remove(a.obj); this.active.splice(i, 1); }
+                const far = Math.max(Math.abs(MAP_RECT.minX), Math.abs(MAP_RECT.maxX)) + 100;
+                if (Math.abs(a.obj.position.x) > far) { this.ctx.scene.remove(a.obj); this.active.splice(i, 1); }
                 continue;
             }
 
