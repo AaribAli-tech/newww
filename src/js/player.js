@@ -39,7 +39,11 @@ export class Player {
         this.currentEye = EYE_STAND;
 
         this.walkSpeed = 4.9;
-        this.sprintSpeed = 7.6;
+        // The town grew south by 44% of its area this pass and the trip to the new
+        // row was a slog at the old pace, so sprint is a quarter faster. Walking and
+        // crouching are deliberately untouched — crouch is a stealth trade, and the
+        // bots keep their own speeds so nobody's difficulty moved.
+        this.sprintSpeed = 9.5;
         this.crouchSpeed = 2.4;
         this.accel = 55;
         this.airAccel = 9;
@@ -245,11 +249,18 @@ export class Player {
 
         // recoil: view punch + spread bloom
         const r = d.recoil;
-        const adsMul = this.isADS ? 0.62 : 1;
+        // A scoped rifle is the one gun where the punch is not just felt, it is
+        // seen: the whole view swings off the target and has to be pulled back. The
+        // ask was a quarter less of exactly that, so the view punch and the shake
+        // shrink while aiming through a scope. What is NOT touched is the spread
+        // bloom on the next line — that decides whether the shot earns the kill, and
+        // quietly making three guns more accurate is a balance change, not comfort.
+        const scopeMul = (this.isADS && d.scope) ? 0.75 : 1;
+        const adsMul = (this.isADS ? 0.62 : 1) * scopeMul;
         this.viewKickVY += (r.v * 60) * adsMul;
         this.viewKickVX += (Math.random() - 0.5) * r.h * 110 * adsMul;
         this.spread = Math.min(1, this.spread + (this.isADS ? 0.10 : 0.20));
-        this.shake = Math.max(this.shake, r.kick * 0.55);
+        this.shake = Math.max(this.shake, r.kick * 0.55 * scopeMul);
 
         // ── the actual bullets ──
         const origin = this.camera.position.clone();

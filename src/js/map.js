@@ -970,11 +970,15 @@ function picketRun(x0, z0, x1, z1) {
     const s = CTX.s;
     const ax = x0 * s, bx = x1 * s;
     const len = Math.hypot(bx - ax, z1 - z0);
-    const mat = picketRun.mat.clone();
-    mat.map = picketRun.mat.map.clone();
-    mat.map.needsUpdate = true;
-    mat.map.repeat.set(len / 1.6, 1);
-    const m = new THREE.Mesh(new THREE.PlaneGeometry(len, 1.2), mat);
+    // One material for every picket in the map, with this panel's tiling baked
+    // into its UVs. Cloning the material per run gave each panel its own texture
+    // upload and, far worse, its own batch: thirty fence panels could then be
+    // neither merged nor instanced, they were thirty draw calls of four verts.
+    const geo = new THREE.PlaneGeometry(len, 1.2);
+    const uv = geo.attributes.uv;
+    for (let i = 0; i < uv.count; i++) uv.setXY(i, uv.getX(i) * (len / 1.6), uv.getY(i));
+    uv.needsUpdate = true;
+    const m = new THREE.Mesh(geo, picketRun.mat);
     m.position.set((ax + bx) / 2, 0.6, (z0 + z1) / 2);
     m.rotation.y = Math.atan2(bx - ax, z1 - z0) + Math.PI / 2;
     m.castShadow = true; m.receiveShadow = true;
@@ -996,11 +1000,14 @@ function chainLinkRun(x0, z0, x1, z1, h = 3.0) {
     const s = CTX.s;
     const ax = x0 * s, bx = x1 * s;
     const len = Math.hypot(bx - ax, z1 - z0);
-    const base = M.chainLink();
-    const mat = base.clone();
-    mat.map = base.map.clone(); mat.map.needsUpdate = true;
-    mat.map.repeat.set(len / 1.4, h / 1.4);
-    const m = new THREE.Mesh(new THREE.PlaneGeometry(len, h), mat);
+    // Shared material, tiling baked into the panel's UVs — see picketRun. Four
+    // cloned textures for four sides of one fence bought nothing, and it kept the
+    // panels out of the batcher.
+    const geo = new THREE.PlaneGeometry(len, h);
+    const uv = geo.attributes.uv;
+    for (let i = 0; i < uv.count; i++) uv.setXY(i, uv.getX(i) * (len / 1.4), uv.getY(i) * (h / 1.4));
+    uv.needsUpdate = true;
+    const m = new THREE.Mesh(geo, M.chainLink());
     m.position.set((ax + bx) / 2, h / 2, (z0 + z1) / 2);
     m.rotation.y = Math.atan2(bx - ax, z1 - z0) + Math.PI / 2;
     m.receiveShadow = true;

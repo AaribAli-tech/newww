@@ -20,7 +20,7 @@ import { DIFFICULTIES, difficultyById, isDifficulty, applyDifficulty, rollSkill,
 import { characterAssets } from './character.js';
 import { vmAssets, vmAssetsReady } from './vmassets.js';
 import { upgradeTextures, photoStatus } from './materials.js';
-import { mergeStaticScene, mergeRig, pruneShadowCasters } from './optimize.js';
+import { batchStaticScene, mergeStaticScene, mergeRig, pruneShadowCasters } from './optimize.js';
 import { WEAPON_DEFS } from './weapons.js';
 import { TEAM_A, TEAM_B, BOT_NAMES_A, BOT_NAMES_B, randElement, clamp, shuffle, MAP_SCALE } from './utils.js';
 import * as A from './audio.js';
@@ -40,6 +40,10 @@ let cw, effects, vm, player, hud, streaks, gamemode;
 let bots = [];
 let state = 'loading';           // loading | menu | playing | paused | ended
 let last = 0, elapsed = 0;
+// How big a piece of the town one cullable object is, in world metres. Small
+// tiles cull better and cost more draw calls; 72 m is where the measured curve
+// bends — 50k vertices a frame instead of 167k, for about 180 draws instead of 100.
+const TILE = 72;
 // One whole frame's GPU work, for the F readout. three resets renderer.info on
 // every render() call, and the post composer renders several passes per frame,
 // so reading info directly reports the last pass only — it always looked like
@@ -490,10 +494,22 @@ function setupWorld() {
     dust = built.dust;
     // Batch the map before anything dynamic joins the scene. Collision lives in
     // separate AABBs, so this is purely a rendering optimisation.
+    //
+    // Instanced tiles rather than one merged mesh per material: a bucket that
+    // spans the whole town can never be rejected by the frustum test, so the old
+    // scheme handed the GPU all 107k map vertices every frame in the colour pass
+    // and 60k more in the shadow pass, whichever way the player was facing. The
+    // town is now ~26 tiles of shared unit-box instances — 74% fewer vertices per
+    // frame, and a little over half the vertex memory.
     const pruned = pruneShadowCasters(scene);
-    const stats = mergeStaticScene(scene);
-    console.info(`[map] batched ${stats.before} meshes into ${stats.after} draw calls, ` +
+    const stats = batchStaticScene(scene, { cell: TILE, minInstances: 2 });
+    console.info(`[map] batched ${stats.before} meshes into ${stats.groups} groups ` +
+                 `(${stats.instances} instanced), ${(stats.bytesBefore / 1048576).toFixed(1)} MB ` +
+                 `-> ${(stats.bytesAfter / 1048576).toFixed(1)} MB of vertex buffers, ` +
                  `dropped ${pruned} small shadow casters`);
+    if (stats.lost !== 0) {
+        console.warn(`[map] batching changed the triangle count by ${stats.lost} — something was dropped`);
+    }
     effects = new Effects(scene);
 }
 

@@ -1744,6 +1744,149 @@ group('crouch, the graphics driver, and nothing floating');
         && 34.0 * MAP_SCALE < MAP_RECT.maxX - 2 && -60.0 * MAP_SCALE > MAP_RECT.minZ + 2
         && tower.stiles === 8 && tower.footed === 8 && tower.rungs === 60,
         `${tower.footed}/${tower.stiles} stiles on the ground, ${tower.rungs} rungs, both mirrored outposts`);
+    // ── batching ────────────────────────────────────────────────────────────
+    const opt = await import('../src/js/optimize.js');
+    const freshScene = () => {
+        const sc = new THREE0.Scene();
+        mapMod.buildNuketown(sc, new CollisionWorld());
+        return sc;
+    };
+    const rawCount = sc => {
+        const a = { verts: 0, resident: 0, tris: 0, bytes: 0, maxSpan: 0, mats: new Set() };
+        for (const o of sc.children) {
+            if (!(o.isMesh || o.isInstancedMesh) || !o.geometry || !o.geometry.attributes.position) continue;
+            if (o.material && o.material.isShaderMaterial) continue;
+            a.mats.add(o.material.uuid);
+            const g = o.geometry, n = g.attributes.position.count, k = o.isInstancedMesh ? o.count : 1;
+            a.verts += n * k; a.resident += n;
+            a.tris += ((g.index ? g.index.count : n) / 3) * k;
+            const b = new THREE0.Box3().setFromObject(o);
+            a.maxSpan = Math.max(a.maxSpan, b.max.x - b.min.x, b.max.z - b.min.z);
+        }
+        a.tris = Math.round(a.tris);
+        return a;
+    };
+    const sMerged = freshScene(); opt.pruneShadowCasters(sMerged); opt.mergeStaticScene(sMerged);
+    const sInst = freshScene(); opt.pruneShadowCasters(sInst);
+    const bs = opt.batchStaticScene(sInst, { cell: 72, minInstances: 2 });
+    const cM = rawCount(sMerged), cI = rawCount(sInst);
+    ok('the map is drawn from instanced primitives, not baked copies of them',
+        bs.instances > 1500 && bs.residentAfter < bs.residentBefore * 0.7
+        && bs.bytesAfter < bs.bytesBefore * 0.7 && bs.lost === 0,
+        `${bs.instances} instances over ${bs.groups} groups, ${(bs.residentBefore / 1000).toFixed(0)}k verts -> ` +
+        `${(bs.residentAfter / 1000).toFixed(0)}k, tris ${bs.trisBefore} -> ${bs.trisAfter}`);
+    ok('nothing vanished in the batcher — the same triangles survive',
+        cM.tris === cI.tris && cM.verts > 0 && cI.tris > 40000,
+        `merged ${cM.tris} tris, instanced ${cI.tris} tris`);
+    // The point of tiles is that the frustum has something to say no to.
+    const spots = [[0, 24], [0, -36], [28, -48], [-28, -48], [0, -67], [36, 0], [-36, 0], [0, 4]];
+    const submitted = sc => {
+        const fr = new THREE0.Frustum(), pm = new THREE0.Matrix4();
+        let vis = 0, all = 0;
+        for (const [x, z] of spots) for (const ry of [0, Math.PI / 2, Math.PI, -Math.PI / 2]) {
+            const cam = new THREE0.PerspectiveCamera(78, 1.77, 0.06, 700);
+            cam.position.set(x * MAP_SCALE, 1.7, z * MAP_SCALE);
+            cam.rotation.set(0, ry, 0); cam.updateMatrixWorld(true);
+            pm.multiplyMatrices(cam.projectionMatrix, cam.matrixWorldInverse);
+            fr.setFromProjectionMatrix(pm);
+            for (const o of sc.children) {
+                if (!(o.isMesh || o.isInstancedMesh) || !o.geometry || !o.geometry.attributes.position) continue;
+                if (o.material && o.material.isShaderMaterial) continue;
+                const g = o.geometry;
+                const cost = g.attributes.position.count * (o.isInstancedMesh ? o.count : 1);
+                all += cost;
+                let sph = o.boundingSphere;
+                if (!sph) { if (!g.boundingSphere) g.computeBoundingSphere(); sph = g.boundingSphere.clone().applyMatrix4(o.matrixWorld); }
+                if (fr.intersectsSphere(sph)) vis += cost;
+            }
+        }
+        const n = spots.length * 4;
+        return { vis: vis / n, all: all / n };
+    };
+    const vM = submitted(sMerged), vI = submitted(sInst);
+    ok('and the tiles are small enough for the camera to throw away',
+        vI.vis < vM.vis * 0.45 && vI.all > 0,
+        `${Math.round(vM.vis / 1000)}k vertices a frame batched by material alone, ` +
+        `${Math.round(vI.vis / 1000)}k per tile`);
+    let objects = 0;
+    for (const o of sInst.children) if (o.isMesh || o.isInstancedMesh) objects++;
+    ok('batching did not trade the vertex bill for an unreasonable number of draws',
+        objects < 620, `${objects} objects for 2,852 authored meshes`);
+    const fenceMats = new Map();
+    scene.traverse(o => {
+        if (!o.isMesh || !o.material || !o.material.map || !o.material.transparent) return;
+        if (!(o.material.alphaTest > 0.4) || o.material.side !== THREE0.DoubleSide) return;
+        fenceMats.set(o.material.uuid, (fenceMats.get(o.material.uuid) || 0) + 1);
+    });
+    ok('every alpha-cut fence panel in town shares one material',
+        fenceMats.size === 1 && fenceMats.get([...fenceMats.keys()][0]) >= 6
+        && !/picketRun\.mat\.clone|base\.clone\(\)/.test(map),
+        `${fenceMats.size} material for ${[...fenceMats.values()][0] || 0} panels`);
+    const mainSrc = await readFile(new URL('../src/js/main.js', import.meta.url), 'utf8');
+    // The one way a batching bug shows up is a piece of the town that is simply
+    // not there: three.js culls an InstancedMesh with its own bounding sphere, and
+    // if that sphere came from the shared geometry, whole streets would vanish.
+    const misbounded = (() => {
+        let bad = 0, checked = 0;
+        for (const o of sInst.children) {
+            if (!o.isInstancedMesh || !o.boundingSphere) continue;
+            checked++;
+            const m4 = new THREE0.Matrix4(), pos = new THREE0.Vector3();
+            for (let i = 0; i < o.count; i++) {
+                o.getMatrixAt(i, m4);
+                pos.setFromMatrixPosition(m4);
+                if (!o.geometry.boundingSphere) o.geometry.computeBoundingSphere();
+                const r = o.geometry.boundingSphere.radius * m4.getMaxScaleOnAxis();
+                if (pos.distanceTo(o.boundingSphere.center) - r > o.boundingSphere.radius + 1e-3) { bad++; break; }
+            }
+        }
+        return { bad, checked };
+    })();
+    ok('every instanced batch is big enough to hold all of its copies',
+        misbounded.checked > 200 && misbounded.bad === 0,
+        `${misbounded.checked} batches, ${misbounded.bad} that would have been culled away`);
+    ok('the map is batched with the tiler, not the old whole-map merge',
+        /batchStaticScene\(scene, \{ cell: TILE, minInstances: 2 \}\)/.test(mainSrc)
+        && !/stats = mergeStaticScene\(scene\)/.test(mainSrc), 'setupWorld uses batchStaticScene');
+    ok('the console says so in numbers a human can check',
+        /vertex buffers/.test(mainSrc) && /stats.lost !== 0/.test(mainSrc));
+    // No mesh raycasting anywhere in the frame: hits are AABBs. The batcher is
+    // allowed to make the meshes unreadable on purpose, so this stays true.
+    const hotSrc = [mainSrc, map, ...await Promise.all(['player', 'ai', 'weapons', 'effects', 'physics']
+        .map(f => readFile(new URL(`../src/js/${f}.js`, import.meta.url), 'utf8')))].join('\n');
+    ok('nothing raycasts the scene; hits are resolved against the AABBs',
+        !/new THREE\.Raycaster|intersectObject/.test(hotSrc));
+    // ── movement and the scoped rifles ──────────────────────────────────────
+    const playerSrc = await readFile(new URL('../src/js/player.js', import.meta.url), 'utf8');
+    const aiSrc = await readFile(new URL('../src/js/ai.js', import.meta.url), 'utf8');
+    const sp = Number(playerSrc.match(/this\.sprintSpeed = ([\d.]+)/)[1]);
+    const wk = Number(playerSrc.match(/this\.walkSpeed = ([\d.]+)/)[1]);
+    const cr = Number(playerSrc.match(/this\.crouchSpeed = ([\d.]+)/)[1]);
+    const longAxis = (MAP_RECT.maxZ - MAP_RECT.minZ);
+    ok('the town is big enough that the run speed had to grow with it',
+        sp >= 9.5 && Math.abs(sp / 7.6 - 1.25) < 0.02 && wk === 4.9 && cr === 2.4,
+        `sprint ${sp} m/s, a ${(longAxis / sp).toFixed(0)} s lap of the long axis (was ${(longAxis / 7.6).toFixed(0)} s)`);
+    ok('and the bots did not get a share of it, so nothing about difficulty moved',
+        !/sprintSpeed|this\.walkSpeed *=/.test(aiSrc),
+        'ai.js has its own speeds and reads none of the player\'s');
+    const scoped = WEAPON_DEFS.filter(w => w.scope);
+    const ADS = 0.62, OLD = 0.75;                       // the 0.62 hip-vs-ADS factor, the 25% cut
+    const kickNow = scoped.map(w => w.recoil.v * 60 * ADS * OLD);
+    const kickWas = scoped.map(w => w.recoil.v * 60 * ADS);
+    ok('the sniper family kicks a quarter less through the scope',
+        scoped.length === 3 && scoped.every(w => w.type === 'sniper')
+        && kickNow.every((v, i) => Math.abs(v - kickWas[i] * 0.75) < 1e-9)
+        && /const scopeMul = \(this\.isADS && d\.scope\) \? 0\.75 : 1;/.test(playerSrc)
+        && /viewKickVY \+= \(r\.v \* 60\) \* adsMul;/.test(playerSrc)
+        && /this\.shake = Math\.max\(this\.shake, r\.kick \* 0\.55 \* scopeMul\);/.test(playerSrc),
+        `${scoped.map((w, i) => `${w.short} ${kickWas[i].toFixed(2)}->${kickNow[i].toFixed(2)}`).join(', ')}`);
+    ok('and that is comfort only — where the bullet goes is untouched',
+        /this\.spread = Math\.min\(1, this\.spread \+ \(this\.isADS \? 0\.10 : 0\.20\)\);/.test(playerSrc)
+        && !/spread.*scopeMul|scopeMul.*spread/.test(playerSrc)
+        && scoped.every(w => playerSrc.includes('scopeMul')),
+        'the bloom line has no scopeMul in it');
+    ok('a scoped shot also stops shaking the camera, not just the pitch',
+        /kick \* 0\.55 \* scopeMul/.test(playerSrc) && !/adsFov \* scopeMul/.test(playerSrc));
     ok('the garage rack stands on two full-height end panels, one per side', countNear(0.6, 2.57, 0.1, [], 0) === 4,
         `${countNear(0.6, 2.57, 0.1, [], 0)} panels — two per garage, from the floor to the top board`);
     {
