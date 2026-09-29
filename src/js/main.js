@@ -21,18 +21,18 @@ import { characterAssets } from './character.js';
 import { vmAssets, vmAssetsReady } from './vmassets.js';
 import { upgradeTextures, photoStatus } from './materials.js';
 import { batchStaticScene, mergeStaticScene, mergeRig, pruneShadowCasters } from './optimize.js';
+import { IS_TOUCH, initTouch } from './touch.js';
 import { WEAPON_DEFS } from './weapons.js';
 import { TEAM_A, TEAM_B, BOT_NAMES_A, BOT_NAMES_B, randElement, clamp, shuffle, MAP_SCALE } from './utils.js';
 import * as A from './audio.js';
 
 const canvas = document.getElementById('gameCanvas');
-// A phone or tablet: nothing to hover with, and a finger on glass. This game is
-// authored for a mouse — pointer lock for aim, a held button for a 780 RPM
-// trigger — so on a touch device we say so up front instead of handing over a
-// menu that leads to a frozen crosshair. Deliberately `(hover: none) and
-// (pointer: coarse)` rather than `maxTouchPoints`, which is also true of
-// touchscreen laptops that can and do play fine.
-const NOT_ON_MOBILE = !!(window.matchMedia && window.matchMedia('(hover: none) and (pointer: coarse)').matches);
+// A phone or a tablet: nothing to hover with, and a finger on glass. There used to
+// be a notice here telling those players to go find a keyboard, because pointer
+// lock and a held mouse button are the whole input model. touch.js replaces that:
+// the same gates, driven by a thumbstick and a drag instead, and no pointer lock
+// anywhere. `(hover: none) and (pointer: coarse)` is the test, not maxTouchPoints,
+// because a touchscreen laptop has the latter and should keep its mouse.
 const $ = id => document.getElementById(id);
 
 let renderer, scene, camera, sun, composerFX, sky, dust;
@@ -84,6 +84,7 @@ function writeFlag(k, v) { try { sessionStorage.setItem(k, v ? '1' : '0'); } cat
 const killChain = new KillChain();
 let deadInfo = null;
 let boardOpen = false;
+let touchCtl = null;                   // the touch HUD, on phones only
 let shadowTick = 0;
 const RESPAWN_TIME = 4.0;
 
@@ -110,7 +111,10 @@ const QUALITY = [
 // a few seconds on any machine with headroom to spare.
 // `difficulty: null` is the state "never asked yet" — the first Deploy screen
 // answers it and it is saved from then on.
-const DEFAULTS = { sens: 1.0, fov: 78, quality: 0, difficulty: null, name: '' };
+// touchSens is a separate number from `sens` on purpose: a finger on glass cannot
+// make the small careful movements a mouse can, so the two are tuned apart.
+const DEFAULTS = { sens: 1.0, fov: 78, quality: 0, difficulty: null, name: '',
+    touchSens: 1.15, ctrlSize: 1.0, ctrlOpacity: 0.5, adsMode: 'tap' };
 let settings = { ...DEFAULTS };
 
 function loadSettings() {
@@ -316,7 +320,18 @@ function warmShaders() {
  * document is not eligible (embedded frame, too soon after an Escape exit).
  * Unhandled, every respawn threw an uncaught rejection into the console.
  */
+/**
+ * Ask for the pointer. On a phone there is nothing to ask for: the flag the mouse
+ * handlers hide behind is set from the state instead, so `locked` means "you are in
+ * a match and not looking at a menu" for both devices. Every caller of this keeps
+ * working unchanged, which is why the branch is here and not at the call sites.
+ */
 function grabPointer() {
+    if (IS_TOUCH) {
+        if (player) player.locked = true;
+        document.body.classList.add('playing');
+        return;
+    }
     const r = canvas.requestPointerLock();
     if (r && typeof r.catch === 'function') r.catch(() => { /* user can click to re-lock */ });
     document.body.classList.add('playing');
@@ -340,6 +355,9 @@ function menuOpen() {
  * arrow stayed invisible over the main menu and the pause card.
  */
 function releaseCursor() {
+    // The touch flag first, then the mouse: the two are independent, and a phone
+    // never held the pointer, so nothing below it has to know about the branch.
+    if (IS_TOUCH && player) player.locked = false;
     if (document.pointerLockElement) document.exitPointerLock();
     document.body.classList.remove('playing');
 }
@@ -620,6 +638,26 @@ function setupPost() {
 function finishBoot() {
     bindUI();
     buildDifficultyUI();
+    // The touch HUD owns its own elements and reads the player, so it comes up
+    // after the rig exists. initTouch() returns null on a desktop, where nothing
+    // in this file happens at all.
+    touchCtl = initTouch({
+        getPlayer: () => player,
+        roam,
+        settings: () => settings,
+        saveSettings,
+        state: () => state,
+        menuOpen,
+        // Controls only over live play. A paused or ended screen, or the settings
+        // card, must leave the whole screen free for tapping.
+        visible: () => state === 'playing' && !menuOpen(),
+        roaming: () => roam.active,
+        canSkip: () => { const b = $('skipRound'); return !!(b && b.classList.contains('on')); },
+        skip: skipRoundNow,
+        nextPlayer: dir => cycleFocus(dir),
+        scoreboard: on => { boardOpen = !!on; }
+    });
+    if (touchCtl) document.body.classList.add('touch');
     state = 'menu';
     // The one ask. Everything after this is a setting like any other.
     if (!isDifficulty(settings.difficulty)) showDiffGate();
@@ -636,6 +674,7 @@ function finishBoot() {
         get renderer() { return renderer; },
         get player() { return player; },
         get bots() { return bots; },
+        get touch() { return touchCtl; },
         get camera() { return camera; },
         /**
          * Run the real kill path for one synthetic kill, so the browser harness can
@@ -695,34 +734,7 @@ function finishBoot() {
         navigator.serviceWorker.register('./sw.js', { scope: './' }).catch(() => { /* optional */ });
     }
 
-    if (NOT_ON_MOBILE) blockMobile();
-
     requestAnimationFrame(loop);
-}
-
-/**
- * Cover the menu with "not available on mobile" and take Deploy out of reach.
- *
- * Not a punishment — a phone browser will happily run WebGL2 and drop you into a
- * match you cannot aim or shoot in, which reads as a broken game rather than an
- * unsupported one. The notice is honest, and the code never pretends otherwise:
- * there is no touch input path in this build at all.
- */
-function blockMobile() {
-    const gate = document.getElementById('notMobile');
-    if (gate) gate.classList.add('on');
-    const pick = $('modePick');
-    if (pick) pick.style.display = 'none';
-    const foot = $('menuFoot');
-    if (foot) foot.innerHTML = 'Needs a mouse and keyboard &nbsp;•&nbsp; open this link on a laptop or desktop';
-    const start = $('btnStart');
-    if (start) {
-        start.disabled = true;
-        start.textContent = 'Desktop only';
-        start.title = 'This build needs a mouse and keyboard';
-    }
-    const hint = $('pauseHint');
-    if (hint) hint.style.display = 'none';
 }
 
 // ── UI wiring ───────────────────────────────────────────────────────────────
@@ -756,6 +768,43 @@ function bindUI() {
         player.sensitivity = 0.0016 * settings.sens;
         saveSettings();
     };
+
+    // Touch-only rows. They are in the card for every device (the CSS hides them
+    // on a desktop) so the layout does not jump when ?touch=1 is used to test.
+    const tsens = $('touchSensRange'), tsOut = $('touchSensOut');
+    if (tsens) {
+        tsens.value = Math.round(settings.touchSens * 100);
+        tsOut.textContent = settings.touchSens.toFixed(2);
+        tsens.oninput = () => {
+            settings.touchSens = tsens.value / 100;
+            tsOut.textContent = settings.touchSens.toFixed(2);
+            saveSettings();
+        };
+    }
+    for (const [id, key, out, fmt] of [
+        ['ctrlSizeRange', 'ctrlSize', 'ctrlSizeOut', v => `${Math.round(v * 100)}%`],
+        ['ctrlOpacityRange', 'ctrlOpacity', 'ctrlOpacityOut', v => `${Math.round(v * 100)}%`]]) {
+        const el = $(id);
+        if (!el) continue;
+        el.value = Math.round(settings[key] * 100);
+        $(out).textContent = fmt(settings[key]);
+        el.oninput = () => {
+            settings[key] = el.value / 100;
+            $(out).textContent = fmt(settings[key]);
+            saveSettings();
+        };
+    }
+    const adsMode = $('adsModeSeg');
+    if (adsMode) {
+        for (const b of adsMode.querySelectorAll('button')) {
+            b.classList.toggle('on', b.dataset.mode === settings.adsMode);
+            b.onclick = () => {
+                settings.adsMode = b.dataset.mode;
+                for (const o of adsMode.querySelectorAll('button')) o.classList.toggle('on', o === b);
+                saveSettings();
+            };
+        }
+    }
 
     const fov = $('fovRange'), fovOut = $('fovOut');
     fov.value = settings.fov;
@@ -797,6 +846,19 @@ function bindUI() {
         }
         if (e.code === 'Tab' && state === 'playing') { e.preventDefault(); boardOpen = true; }
         if (e.code === 'KeyF') $('perfHud').classList.toggle('hidden');
+        // Killstreak keys, read off the same table the HUD chips print their hint
+        // from. They used to be advertised on the chips and bound nowhere: you
+        // earned the UAV, pressed its key, and nothing happened — the reward looked
+        // broken. One table, one binding, and `e.repeat` so holding it does not
+        // spam the not-ready banner.
+        if (state === 'playing' && !e.repeat && !menuOpen()) {
+            for (const st of STREAKS) {
+                if (e.code !== st.key) continue;
+                e.preventDefault();
+                tryStreak(st.id);
+                break;
+            }
+        }
         // Free roam owns the movement keys while it is up — Space is "fly", not
         // "jump", and A/D strafe instead of changing who you watch. `J`/`K` and a
         // right-click are the only way to hop to another operator.
@@ -826,12 +888,7 @@ function bindUI() {
                   Math.max(-LOOK_CLAMP, Math.min(LOOK_CLAMP, e.movementY || 0)), settings.sens);
     });
 
-    $('skipRound').addEventListener('click', () => {
-        if (gamemode.skipRound && gamemode.skipRound()) {
-            hud.banner('ROUND SKIPPED', '#FFC24A', 'Next round starting');
-            exitFreeRoam();
-        }
-    });
+    $('skipRound').addEventListener('click', skipRoundNow);
     window.addEventListener('keyup', e => { if (e.code === 'Tab') boardOpen = false; });
     // Keys the roam camera swallows. Anything else still reaches the normal
     // handlers, so the scoreboard and the perf strip work mid-flight.
@@ -944,7 +1001,10 @@ function applyQuality() {
     const sel = $('qualitySel');
     if (sel && sel.value !== String(settings.quality)) sel.value = String(settings.quality);
 
-    maxDpr = Math.min(q.dprCap, Math.max(1, DEVICE_DPR));
+    // A phone's screen is small, bright and often 2x-or-3x: past ~1.5 device
+    // pixels per CSS pixel nobody can see the extra detail and the GPU pays for it
+    // in fill rate, which is the one budget a phone does not have.
+    maxDpr = Math.min(q.dprCap, Math.max(1, DEVICE_DPR), IS_TOUCH ? 1.5 : Infinity);
     // Jump straight to the new ceiling so picking a higher preset looks better
     // immediately; the adaptive scaler pulls it back within a second if the
     // frame budget cannot take it.
@@ -1258,6 +1318,14 @@ function roamTargets() {
     return bots.filter(b => b.alive && b !== playerProxy).sort((x, y) => x.name.localeCompare(y.name));
 }
 
+/** The Round Control skip, from either the HUD button or the touch one. */
+function skipRoundNow() {
+    if (gamemode.skipRound && gamemode.skipRound()) {
+        hud.banner('ROUND SKIPPED', '#FFC24A', 'Next round starting');
+        exitFreeRoam();
+    }
+}
+
 function exitFreeRoam() {
     if (!roam.active) return;
     roam.exit(camera);
@@ -1331,6 +1399,13 @@ function loop(ts) {
         composerFX.grade.uniforms.time.value = elapsed;
         composerFX.composer.render();
         return;
+    }
+
+    // The touch HUD mirrors state into player.touch before anything reads it, and
+    // hides itself the moment a menu is on screen. No-op on a desktop.
+    if (touchCtl) {
+        touchCtl.frame();
+        if (player) player.locked = !menuOpen();
     }
 
     // ── playing ──

@@ -2,7 +2,8 @@
 <html lang="en">
 <head>
 <meta charset="UTF-8">
-<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0,
+      user-scalable=no, viewport-fit=cover">
 <title>NUKETOWN</title>
 <!-- Fonts are self-hosted: no third-party stylesheet to wait for before the menu
      paints. The web build folds fonts.css into the site stylesheet; this plain
@@ -511,31 +512,214 @@ canvas#gameCanvas{display:block;width:100vw;height:100vh}
 #pauseHint{position:absolute;bottom:8px;left:50%;transform:translateX(-50%);
   font-family:'Barlow Condensed',sans-serif;font-size:11px;letter-spacing:.3em;
   color:rgba(255,255,255,.22);text-transform:uppercase}
-/* ══════════════════════ NOT AVAILABLE ON MOBILE ══════════════════════
-   Covers the menu on a touch device (see blockMobile() in main.js). Above the
-   menu and the pause/end overlays, below the loader, so it never hides a
-   progress bar someone still needs. */
-#notMobile{position:fixed;inset:0;z-index:2500;display:none;place-items:center;padding:20px;
-  background:#06080b;text-align:center;overflow:auto}
-#notMobile.on{display:grid}
-#notMobile .nmCard{max-width:520px;border:1px solid rgba(255,255,255,.14);border-radius:14px;
-  padding:26px 30px;background:rgba(255,255,255,.03)}
-#notMobile h2{font-family:'Teko',sans-serif;font-size:clamp(26px,5.4vw,44px);line-height:1.05;
-  letter-spacing:.12em;text-transform:uppercase;color:var(--accent);margin:0 0 8px}
-#notMobile p{font-family:'Barlow Condensed',sans-serif;font-size:15.5px;letter-spacing:.05em;
-  color:rgba(255,255,255,.7);margin:0 0 10px;line-height:1.6}
-#notMobile .nmGo{color:#fff;font-size:16px;letter-spacing:.12em;text-transform:uppercase;margin:0}
-#notMobile .nmKeys{display:inline-flex;gap:5px;flex-wrap:wrap;justify-content:center;margin:0 0 12px}
-#notMobile .nmKeys kbd{font:600 11.5px/1 'Barlow Condensed',monospace;padding:4px 8px;border-radius:5px;
-  border:1px solid rgba(255,255,255,.22);background:rgba(255,255,255,.06);color:#fff}
-/* a landscape phone is only ~380px tall, and a clipped last line is the whole point */
-@media (max-height:560px){
-  #notMobile .nmCard{padding:14px 20px}
-  #notMobile p{font-size:14px;line-height:1.45;margin-bottom:6px}
-  #notMobile .nmKeys kbd{padding:3px 7px}
-  #notMobile .nmKeys{margin-bottom:7px}
+/* ══════════════════════ TOUCH: THE HUD, THE STICK, THE BUTTONS ══════════════════════
+   Everything here is behind `body.touch`, which touch.js sets only when
+   `(hover: none) and (pointer: coarse)` matches (or ?touch=1 forces it, for testing
+   on a desktop). A mouse and keyboard therefore never see a single one of these
+   rules, and the desktop layout is bit-for-bit what it always was.
+
+   Sizing: every control is `vmin`, i.e. a fraction of the smaller of the two screen
+   sides, so a 360×640 landscape phone and an 1024×768 tablet get the same physical
+   thumb target. `--tsize` is the Controls size slider, multiplied in. */
+#touchUI{position:fixed;inset:0;z-index:120;display:none;
+  --tsize:1;--topaque:.5;
+  /* The three sizes every control is drawn from. vmin keeps a 360×640 phone and a
+     412×915 one thumb-identical; the floors are the Free Fire targets (a 90 px base,
+     a 60-68 px trigger, 38-44 px on the arc) and --tsize is the Controls size slider.
+     STICK_R in touch.js is half of --base's floor: change one, change the other. */
+  --base:calc(clamp(90px,25vmin,100px) * var(--tsize));
+  --fire:calc(clamp(60px,16.7vmin,68px) * var(--tsize));
+  --mini:calc(clamp(38px,10.6vmin,44px) * var(--tsize));
+  --gap:calc(6px + 1.1vmin);
+  /* The grid the thumb cluster is laid out on: two rows, three columns, each one
+     step = a button plus a gutter from the next. Every placement below is written
+     in these, so one number changes the whole cluster. */
+  --row1:calc(var(--gap) + (var(--fire) - var(--mini)) / 2 + env(safe-area-inset-bottom,0px));
+  --row2:calc(var(--gap) + var(--fire) + var(--gap) + env(safe-area-inset-bottom,0px));
+  --c1:calc(var(--gap) + var(--fire) + var(--gap) + env(safe-area-inset-right,0px));
+  --c2:calc(var(--c1) + var(--mini) + var(--gap));
+  --c3:calc(var(--c2) + var(--mini) + var(--gap));
+  font-family:'Barlow Condensed',sans-serif;pointer-events:none;
+  touch-action:none;-webkit-user-select:none;user-select:none;-webkit-touch-callout:none}
+#touchUI.on{display:block}
+#touchUI .tz{position:absolute;top:0;bottom:0;pointer-events:auto;touch-action:none}
+#stickZone{left:0;width:40%}
+#lookZone{left:40%;right:0}
+/* The stick is drawn where the thumb lands, which is the single thing that makes a
+   virtual stick usable: you never look down to find it. */
+#stick{position:absolute;width:var(--base);height:var(--base);margin:calc(var(--base) / -2);
+  border-radius:50%;opacity:var(--topaque);display:none;
+  border:1.5px solid rgba(255,255,255,.5);background:rgba(8,12,16,.34);
+  box-shadow:inset 0 0 22px rgba(0,0,0,.42)}
+#stick.on{display:block}
+#stickKnob{position:absolute;left:50%;top:50%;width:calc(var(--base) * .42);height:calc(var(--base) * .42);
+  margin:calc(var(--base) * -.21);border-radius:50%;background:rgba(255,255,255,.62);
+  border:1px solid rgba(255,255,255,.8);box-shadow:0 2px 10px rgba(0,0,0,.5)}
+.tbtn{position:absolute;pointer-events:auto;touch-action:none;display:grid;place-items:center;
+  width:var(--mini);height:var(--mini);border-radius:50%;padding:0;
+  border:1.5px solid rgba(255,255,255,.42);background:rgba(8,12,16,.36);color:rgba(255,255,255,.9);
+  font-size:calc(var(--mini) * .3);line-height:1;letter-spacing:.06em;text-transform:uppercase;
+  opacity:var(--topaque);transition:opacity .1s,transform .06s,background .1s,border-color .1s;
+  -webkit-tap-highlight-color:transparent}
+.tbtn span{display:block;font-size:calc(var(--mini) * .46);line-height:1}
+.tbtn.down,.tbtn.lit{opacity:1;transform:scale(.93);border-color:var(--accent);
+  background:rgba(255,122,24,.26);color:#fff}
+.tbtn.hide{display:none}
+#tFire,#tFire2{width:var(--fire);height:var(--fire);font-size:calc(var(--fire) * .3)}
+#tFire{right:calc(var(--gap) + env(safe-area-inset-right,0px));
+  bottom:calc(var(--gap) + env(safe-area-inset-bottom,0px))}
+/* A second trigger under the left thumb, so a phone can strafe and shoot at once
+   the way a controller does. It drives the same `fire` flag. */
+#tFire2{left:calc(var(--gap) + env(safe-area-inset-left,0px));
+  bottom:calc(var(--base) + var(--gap) * 3 + env(safe-area-inset-bottom,0px));
+  width:calc(var(--fire) * .72);height:calc(var(--fire) * .72)}
+/* The six small controls sit in two rows to the left of and above the trigger.
+   A ring would look better on paper and collide on a 360 px tall screen: at a
+   38 px button the neighbours of an arc are 12 px apart, and a thumb is 21 px
+   wide. A grid keeps every edge at least a full button apart, which is also what
+   makes "reach for it without looking" work. */
+#tReload{right:var(--c1);bottom:var(--row1)}
+#tAds{right:var(--c2);bottom:var(--row1)}
+#tSwap{right:var(--c3);bottom:var(--row1)}
+#tJump{right:calc(var(--gap) + env(safe-area-inset-right,0px));bottom:var(--row2)}
+#tCrouch{right:var(--c1);bottom:var(--row2)}
+#tSprint{right:var(--c2);bottom:var(--row2)}
+#tBoard{left:50%;margin-left:calc(var(--mini) / -2);top:calc(var(--gap) + env(safe-area-inset-top,0px))}
+#tSkip{left:calc(50% + var(--mini));top:calc(var(--gap) + env(safe-area-inset-top,0px))}
+/* Free roam (the camera you ride after you die) owns different buttons: fly up and
+   down instead of jumping, no trigger. */
+#tUp,#tNext{right:calc(var(--gap) + env(safe-area-inset-right,0px));display:none}
+#tUp{bottom:var(--row2)}
+#tNext{bottom:var(--row1)}
+#tDown{right:var(--c1);bottom:var(--row1);display:none}
+#touchUI.roam #tDown,#touchUI.roam #tUp,#touchUI.roam #tNext{display:grid}
+#touchUI.roam #tFire,#touchUI.roam #tFire2,#touchUI.roam #tAds,#touchUI.roam #tReload,
+#touchUI.roam #tSwap,#touchUI.roam #tJump{display:none}
+body.touch #skipRound{display:none}           /* #tSkip is the same action, sized for a thumb */
+/* The mute and pause chips live in the HUD, not the touch layer, so they stay put
+   over a menu; they only get thumb-sized on a phone. */
+body.touch #gameBtns{gap:6px;z-index:130}
+body.touch #gameBtns .gbtn{width:38px;height:38px;font-size:15px}
+/* The streak tiles are the only HUD widgets you have to press, so they sit ABOVE
+   the look pad (otherwise a tap meant for Airstrike turns the camera instead) and
+   grow to a thumb-sized target. */
+body.touch #streakCol{z-index:130;gap:5px}
+/* Fullscreen sits with the scoreboard chip in the top-centre row: the corners are
+   taken by the minimap and by the mute/pause chips. */
+body.touch #tFull{left:calc(50% - var(--mini) * 2.15);right:auto;
+  top:calc(var(--gap) + env(safe-area-inset-top,0px))}
+
+/* ── portrait: say so, and stop trying to play sideways ── */
+#rotate{position:fixed;inset:0;z-index:2600;display:none;place-items:center;text-align:center;
+  background:#06080b;color:#fff;padding:24px}
+#rotate b{display:block;font-family:'Teko',sans-serif;font-size:clamp(24px,7vw,40px);
+  letter-spacing:.16em;text-transform:uppercase;color:var(--accent);margin-bottom:8px}
+#rotate span{font-family:'Barlow Condensed',sans-serif;font-size:14px;letter-spacing:.1em;
+  color:rgba(255,255,255,.66)}
+#rotate i{display:block;font-size:46px;margin-bottom:10px;animation:turn 2.4s ease-in-out infinite}
+@keyframes turn{0%,42%{transform:rotate(0)}58%,100%{transform:rotate(90deg)}}
+
+/* ── the phone itself: no rubber-band, no zoom, no selection ──
+   The media query rather than the class, because `html` cannot be selected through
+   a class on `body`, and because it must apply before touch.js has run. */
+@media (hover:none) and (pointer:coarse){
+  html,body{position:fixed;inset:0;width:100%;height:100%;min-height:100dvh;
+    overflow:hidden;overscroll-behavior:none;touch-action:none;
+    -webkit-user-select:none;user-select:none;-webkit-touch-callout:none;
+    -webkit-text-size-adjust:100%}
+  #menu,#panel,#pause,#end,#diffGate,#board,#loader{min-height:100dvh}
+  input{font-size:16px}                     /* below 16px iOS zooms the page on focus */
 }
-@media (max-height:420px){ #notMobile .nmKeys{display:none} }
+/* Portrait: cover the game rather than let someone squint at a quarter of it.
+   Pure CSS, so there is no resize handler to forget to unbind. */
+@media (hover:none) and (pointer:coarse) and (orientation:portrait){
+  body.touch #rotate{display:grid}
+}
+/* ── short screens: the menu and the HUD have to fit a 640×360 landscape phone ──
+   Two columns, title and playlist on the left, the buttons on the right. */
+@media (max-height:560px){
+  body.touch #menu .menuInner{display:grid;grid-template-columns:minmax(0,1fr) auto;gap:0 18px;
+    align-content:center;width:min(760px,94vw);margin:0 auto;padding:0 14px}
+  body.touch #menu h1{font-size:clamp(30px,7.6vh,54px);margin:0 0 2px;grid-column:1}
+  body.touch .subrule{margin:0 0 8px;grid-column:1}
+  body.touch .subrule i{width:34px}
+  body.touch #modePickLabel{grid-column:1;font-size:9.5px;letter-spacing:.3em}
+  body.touch #modePick{grid-column:1;width:100%;margin:0;gap:4px}
+  body.touch #menuName, body.touch #menuDiff{grid-column:1;margin:8px 0 0;font-size:11px;gap:6px}
+  body.touch #menuName span, body.touch #menuDiff span{min-width:58px;font-size:10.5px}
+  body.touch #menuName input, body.touch #menuDiff, body.touch #gateName input{height:28px;font-size:12.5px}
+  body.touch #btnStart{grid-column:2;grid-row:1/3;align-self:center;height:38px;font-size:13px;padding:0 18px;margin:0}
+  body.touch #btnControls, body.touch #btnMute, body.touch #menuFull{grid-column:2;font-size:11.5px;height:30px;padding:0 12px;margin:0;letter-spacing:.16em}
+  body.touch #menu .menuInner{grid-template-rows:auto auto auto auto auto auto auto}
+  body.touch #btnControls{grid-row:3}body.touch #btnMute{grid-row:4}body.touch #menuFull{grid-row:5}
+  body.touch #menu{padding:0}
+  body.touch #menuFoot{font-size:10px;letter-spacing:.22em;bottom:6px}
+  body.touch .menuBtn{padding:8px 14px;letter-spacing:.2em;font-size:12.5px}
+  body.touch #hud{font-size:12px}
+  body.touch #miniWrap{top:calc(10px + env(safe-area-inset-top,0px));left:calc(10px + env(safe-area-inset-left,0px));
+    width:118px;height:118px}
+  body.touch #matchBar{top:calc(132px + env(safe-area-inset-top,0px));left:calc(10px + env(safe-area-inset-left,0px));width:118px}
+  body.touch #matchBar #modeLine, body.touch #matchBar #modeState{font-size:10px}
+  body.touch #nukeTrack{width:min(260px,52vw);top:calc(8px + env(safe-area-inset-top,0px))}
+  body.touch #killfeed{top:calc(44px + env(safe-area-inset-top,0px));right:calc(8px + env(safe-area-inset-right,0px));gap:2px}
+  body.touch #killfeed .kf{font-size:10.5px;line-height:14px;padding:1px 6px}
+  body.touch #killfeed .kf:nth-child(n+4){display:none}      /* three lines, then stop covering the map */
+  body.touch #eventFeed{font-size:12px}
+  body.touch #healthWrap{left:calc(12px + env(safe-area-inset-left,0px));bottom:calc(10px + env(safe-area-inset-bottom,0px))}
+  body.touch #hpNum{font-size:22px}
+  body.touch #hpBar{width:104px}
+  body.touch .stk .ky{display:none}                          /* no keyboard on a phone to key-map */
+  body.touch #reloadHint, body.touch #pauseHint, body.touch #ntHint{display:none}
+  body.touch .card{padding:14px 16px;max-height:88dvh;overflow:auto}
+  body.touch .kv{font-size:12px;padding:5px 0}
+  body.touch .rowSet{padding:8px 0;gap:10px}
+  body.touch .rowSet label{font-size:12.5px}
+  body.touch .rowSet output{font-size:16px;width:52px;min-width:52px}
+  body.touch #board .bwrap{max-height:86dvh;overflow:auto}
+  body.touch #board .br{font-size:11.5px}
+  body.touch #pause .menuBtn, body.touch #end .menuBtn{height:36px;font-size:13px}
+}
+@media (max-height:420px){
+  body.touch #menu h1{font-size:34px}
+  body.touch #modePick button{padding:5px 9px;font-size:11.5px}
+  body.touch #menuName,body.touch #menuDiff{margin-top:5px}
+  body.touch #killfeed .kf:nth-child(n+3){display:none}
+  body.touch #matchBar{top:calc(126px + env(safe-area-inset-top,0px))}
+  body.touch #miniWrap{width:104px;height:104px}
+}
+/* ═════════════════ PHONE: THE RIGHT EDGE BELONGS TO THE THUMB ═════════════════
+   Four readouts used to live down there with the trigger (ammo, weapon chips, the
+   streak tiles, the kill feed). On a phone that whole area is covered by a hand, so
+   they are re-stacked into the one column nothing else needs, top-right under the
+   mute and pause chips: feed, ammo, weapons, streaks. Specificity and file order
+   both put these on top of the rules above, which is why they sit after them. */
+body.touch #killfeed{top:calc(56px + env(safe-area-inset-top,0px));
+  right:calc(16px + env(safe-area-inset-right,0px));width:min(180px,29vw);gap:2px}
+body.touch #killfeed .kf{font-size:10.5px;line-height:14px;padding:1px 6px}
+body.touch #killfeed .kf:nth-child(n+4){display:none}   /* three lines, on any size */
+body.touch #brWrap{top:calc(112px + env(safe-area-inset-top,0px));
+  right:calc(16px + env(safe-area-inset-right,0px));bottom:auto;left:auto;
+  flex-direction:row-reverse;align-items:center;gap:8px}
+body.touch #equip{flex-direction:row;padding-bottom:0;gap:4px}
+body.touch .eq{min-width:0;padding:2px 6px}
+body.touch #slots{top:calc(146px + env(safe-area-inset-top,0px));
+  right:calc(16px + env(safe-area-inset-right,0px));bottom:auto}
+body.touch #streakCol{top:calc(172px + env(safe-area-inset-top,0px));
+  right:calc(12px + env(safe-area-inset-right,0px));bottom:auto;transform:none;
+  flex-direction:row;gap:4px}
+body.touch .stk{width:44px;height:28px;font-size:9px;pointer-events:auto;gap:0}
+body.touch .stk .ic{font-size:13px}
+body.touch .stk .nm{font-size:7.5px;letter-spacing:.8px}
+body.touch #nukeTrack{top:auto;bottom:calc(var(--mini) * 2.6 + env(safe-area-inset-bottom,0px));
+  left:calc(12px + env(safe-area-inset-left,0px));transform:none;width:min(220px,38vw)}
+body.touch #healthWrap{bottom:calc(var(--mini) + var(--gap) * 2 + env(safe-area-inset-bottom,0px));
+  left:calc(12px + env(safe-area-inset-left,0px))}
+
+/* Touch-only rows in the Controls card, and the keyboard list it replaces. */
+body:not(.touch) .touchRow{display:none}
+body.touch #panel .kv{display:none}
+body.touch #modePick{width:100%}
+
 .menuBtn:disabled{opacity:.45;cursor:not-allowed;letter-spacing:.2em}
 .menuBtn:disabled:hover{background:rgba(255,255,255,.03);border-color:rgba(255,255,255,.18);color:var(--ink)}
 /* ══════════════════════ KILL FEEDBACK ══════════════════════
@@ -600,6 +784,7 @@ canvas#gameCanvas{display:block;width:100vw;height:100vh}
     <button class="menuBtn primary" id="btnStart">Deploy</button>
     <button class="menuBtn" id="btnControls">Controls</button>
     <button class="menuBtn" id="btnMute">Sound: On</button>
+    <button class="menuBtn touchRow" id="menuFull" type="button">Fullscreen</button>
   </div>
   <div id="menuFoot">Nevada Atomic Test Site &nbsp;•&nbsp; 1962</div>
 </div>
@@ -639,6 +824,29 @@ canvas#gameCanvas{display:block;width:100vw;height:100vh}
       <label>Sensitivity</label>
       <input type="range" id="sensRange" min="20" max="400" value="100">
       <output id="sensOut">1.00</output>
+    </div>
+    <div class="rowSet touchRow">
+      <label>Touch aim speed</label>
+      <input type="range" id="touchSensRange" min="40" max="300" value="115">
+      <output id="touchSensOut">1.15</output>
+    </div>
+    <div class="rowSet touchRow">
+      <label>Controls size</label>
+      <input type="range" id="ctrlSizeRange" min="80" max="140" value="100">
+      <output id="ctrlSizeOut">100%</output>
+    </div>
+    <div class="rowSet touchRow">
+      <label>Controls opacity</label>
+      <input type="range" id="ctrlOpacityRange" min="25" max="95" value="50">
+      <output id="ctrlOpacityOut">50%</output>
+    </div>
+    <div class="rowSet touchRow">
+      <label>Aim button</label>
+      <div class="diffSeg" id="adsModeSeg">
+        <button type="button" data-mode="tap">Tap to hold aim</button>
+        <button type="button" data-mode="hold">Hold to aim</button>
+      </div>
+      <output class="note">Tap leaves the scope in until you tap again.</output>
     </div>
     <div class="rowSet">
       <label>Field of view</label>
@@ -752,19 +960,32 @@ canvas#gameCanvas{display:block;width:100vw;height:100vh}
 </div>
 
 
-<!-- the phone/tablet gate: this build is mouse-driven, so we say so plainly -->
-<div id="notMobile" role="alertdialog" aria-label="Not available on mobile">
-  <div class="nmCard">
-    <h2>Not available on mobile</h2>
-    <p>
-      NUKETOWN is built around a mouse: pointer-locked aim, a held trigger, four
-      weapon keys. A finger on glass cannot do that justice, so there is no touch
-      version to fall back to &mdash; this is a computer game.
-    </p>
-    <div class="nmKeys">
-      <kbd>W A S D</kbd><kbd>MOUSE AIM</kbd><kbd>LMB FIRE</kbd><kbd>R RELOAD</kbd><kbd>ESC PAUSE</kbd>
-    </div>
-    <p class="nmGo">Open this link on a laptop or desktop to play</p>
+<!-- ════════ TOUCH HUD (shown only on touch devices; see touch.js) ════════
+     The zones are invisible; the stick is drawn wherever the left thumb lands.
+     Sizes and positions all live in the #touchUI block of the stylesheet. -->
+<div id="touchUI" aria-hidden="true">
+  <div id="stickZone" class="tz"></div>
+  <div id="lookZone" class="tz"></div>
+  <div id="stick"><i id="stickKnob"></i></div>
+  <button class="tbtn" id="tFire" type="button"><span>&#9679;</span>FIRE</button>
+  <button class="tbtn" id="tFire2" type="button"><span>&#9679;</span></button>
+  <button class="tbtn" id="tAds" type="button"><span>&#9678;</span></button>
+  <button class="tbtn" id="tJump" type="button"><span>&#8613;</span></button>
+  <button class="tbtn" id="tCrouch" type="button"><span>&#8615;</span></button>
+  <button class="tbtn" id="tReload" type="button"><span>&#8635;</span></button>
+  <button class="tbtn" id="tSwap" type="button"><span>&#8646;</span></button>
+  <button class="tbtn" id="tSprint" type="button"><span>&#10148;</span></button>
+  <button class="tbtn" id="tBoard" type="button"><span>&#9776;</span></button>
+  <button class="tbtn hide" id="tSkip" type="button"><span>&#9197;</span></button>
+  <button class="tbtn" id="tUp" type="button"><span>&#9650;</span></button>
+  <button class="tbtn" id="tDown" type="button"><span>&#9660;</span></button>
+  <button class="tbtn" id="tNext" type="button"><span>&#9197;</span></button>
+  <button class="tbtn" id="tFull" type="button"><span>&#9974;</span></button>
+</div>
+
+<div id="rotate"><i>&#8635;</i><b>Turn your phone</b>
+  <span>NUKETOWN plays sideways &nbsp;•&nbsp; tap the fullscreen arrow to lock it</span></div>
+
   </div>
 </div>
 

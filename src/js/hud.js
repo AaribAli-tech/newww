@@ -442,7 +442,7 @@ export class HUD {
             }
         }
 
-        this._minimap(player, bots);
+        this._minimap(player, bots, !!(s.killstreaks && s.killstreaks.revealing));
 
         // timers
         if (this.hmTimer > 0) {
@@ -532,7 +532,7 @@ export class HUD {
     }
 
     // ── minimap ─────────────────────────────────────────────────────────────
-    _minimap(player, bots) {
+    _minimap(player, bots, reveal = false) {
         const c = this.mctx;
         if (!c) return;
         const half = MINI_HALF;
@@ -620,18 +620,32 @@ export class HUD {
             if (!b.alive) continue;
             const friendly = !solo && b.team === player.team;
             const flashed = now - (this.lastFireFlash.get(b) || -1e9) < 1800;
-            if (!friendly && !flashed && !solo) continue;
+            // An enemy is on the radar while he is shooting, and — for the twenty
+            // seconds a UAV is up — the rest of the time as well. That reveal is
+            // the reward: the map is otherwise a map of where people *were*.
+            if (!friendly && !flashed && !solo && !reveal) continue;
             const dx = (b.position.x - px) * MINI_SCALE, dz = (b.position.z - pz) * MINI_SCALE;
             const sx = half + dx * cs - dz * sn, sy = half + dx * sn + dz * cs;
             if (Math.hypot(sx - half, sy - half) > edge) continue;
             c.save();
             c.translate(sx, sy);
             c.rotate(b.yaw - player.yaw + Math.PI);
-            c.fillStyle = friendly ? '#4FA8FF' : (flashed ? 'rgba(255,77,77,0.75)' : '#FF4D4D');
+            c.fillStyle = friendly ? '#4FA8FF'
+                : (flashed ? 'rgba(255,77,77,0.75)' : (reveal ? 'rgba(255,140,140,0.62)' : '#FF4D4D'));
             c.beginPath();
             c.moveTo(0, -6); c.lineTo(4.6, 5); c.lineTo(0, 2.4); c.lineTo(-4.6, 5);
             c.closePath(); c.fill();
             if (b.position.y > 2.5) { c.fillStyle = '#fff'; c.fillRect(-1, -9.5, 2, 2); }
+            c.restore();
+        }
+
+        // The tag on the ring: a full radar should say why it is full.
+        if (reveal) {
+            c.save();
+            c.font = 'bold 15px "Barlow Condensed", sans-serif';
+            c.fillStyle = 'rgba(126,224,138,0.92)';
+            c.textAlign = 'center';
+            c.fillText('UAV', half, half - MAP_R - 6);
             c.restore();
         }
 

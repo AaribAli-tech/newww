@@ -93,6 +93,17 @@ export class Player {
         this.mouseDown = false;
         this.mouseRight = false;
         this.locked = false;
+        // Touch input, written by touch.js and read here. It is deliberately a
+        // plain object of already-normalised values rather than a set of synthetic
+        // key events: no code below has to care where a thumb came from, and a
+        // fake KeyboardEvent would lie about `repeat`, `code` and `isTrusted`.
+        this.touch = {
+            moveX: 0, moveY: 0,          // -1..1 analog, dead-zoned at the source
+            sprint: false, sprintBtn: false,
+            fire: false, ads: false,     // held booleans
+            jump: false,                 // one-frame pulse, cleared below
+            lookDX: 0, lookDY: 0         // pixel deltas, spent once per frame
+        };
         this.paused = false;
 
         this._bind();
@@ -117,8 +128,6 @@ export class Player {
             if (e.code === 'Digit3') this.useSlot(2);
             if (e.code === 'Digit4') this.useSlot(3);
             if (e.code === 'KeyQ') this.cycleSlot(1);
-            if (e.code === 'KeyX') this.ctx.useStreak('air');
-            if (e.code === 'KeyV') this.ctx.useStreak('nuke');
         });
         window.addEventListener('keyup', e => { this.keys[e.code] = false; });
         window.addEventListener('mousemove', e => {
@@ -126,16 +135,8 @@ export class Player {
             // Pointer lock occasionally emits a single enormous delta (window
             // focus changes, driver hiccups). Unclamped, that snaps the view
             // right round and feels like the mouse "slipped".
-            const mx = clamp(e.movementX, -MAX_DELTA, MAX_DELTA);
-            const my = clamp(e.movementY, -MAX_DELTA, MAX_DELTA);
-            // ADS scaling follows the zoom ratio so the same hand movement
-            // covers the same on-screen distance whether hipfiring or aiming.
-            const zoom = this.isADS ? this.baseFov / Math.max(10, this.camera.fov) : 1;
-            const scale = this.sensitivity / (1 + (zoom - 1) * this.adsSensScale);
-            this.yaw -= mx * scale;
-            this.pitch -= my * scale;
-            this.pitch = clamp(this.pitch, -PITCH_LIMIT, PITCH_LIMIT);
-            this.vm.addLook(mx, my);
+            this._applyLook(clamp(e.movementX, -MAX_DELTA, MAX_DELTA),
+                            clamp(e.movementY, -MAX_DELTA, MAX_DELTA));
         });
         window.addEventListener('mousedown', e => {
             if (!this.locked) return;
@@ -152,6 +153,28 @@ export class Player {
             this.cycleSlot(e.deltaY > 0 ? 1 : -1);
         }, { passive: true });
     }
+
+    /**
+     * Turn the view by a pixel delta. The mouse and a thumb drag both come
+     * through here, so sensitivity, the ADS zoom compensation, the pitch clamp and
+     * the viewmodel sway are one rule and not two that drift apart. The clamp on
+     * the mouse side (MAX_DELTA) is deliberately not applied to touch: touch.js
+     * already accumulates a frame of drag, and a phone does not emit a 4,000 px
+     * jump because a driver hiccuped.
+     */
+    _applyLook(mx, my) {
+        // ADS scaling follows the zoom ratio so the same hand movement
+        // covers the same on-screen distance whether hipfiring or aiming.
+        const zoom = this.isADS ? this.baseFov / Math.max(10, this.camera.fov) : 1;
+        const scale = this.sensitivity / (1 + (zoom - 1) * this.adsSensScale);
+        this.yaw -= mx * scale;
+        this.pitch -= my * scale;
+        this.pitch = clamp(this.pitch, -PITCH_LIMIT, PITCH_LIMIT);
+        this.vm.addLook(mx, my);
+    }
+
+    /** Held-fire from either device. `mouseDown` stays the keyboard/mouse truth. */
+    get firing() { return this.mouseDown || this.touch.fire; }
 
     get def() { return WEAPON_DEFS[this.current]; }
     get mag() { return this.weapons[this.current]; }
@@ -214,7 +237,7 @@ export class Player {
 
     // ── firing ──────────────────────────────────────────────────────────────
     tryFire(now) {
-        if (!this.alive || !this.mouseDown || this.paused) return;
+        if (!this.alive || !this.firing || this.paused) return;
         const d = this.def, m = this.mag;
         if (m.reloading || this.vm.switchT > 0) return;
         if (this.isSprinting && this.vm.sprint > 0.55) return;
@@ -384,6 +407,11 @@ export class Player {
         this.mouseDown = false;
         this.mouseRight = false;
         this.isADS = false;
+        // A thumb still on glass when you die must not keep the corpse shooting,
+        // and must not walk away holding fire when it lifts.
+        this.touch.fire = false;
+        this.touch.ads = false;
+        this.touch.moveX = this.touch.moveY = 0;
     }
 
     /** 0..1 — how far through the collapse we are (used to grade the screen). */
@@ -444,9 +472,16 @@ export class Player {
     // ── frame ───────────────────────────────────────────────────────────────
     update(dt, nowSec) {
         if (this.paused) return;
-        if (!this.mouseDown) this._semiLatch = false;
+        const tt = this.touch;
+        if (!this.mouseDown && !this.touch.fire) this._semiLatch = false;
 
         if (this.alive) {
+            // A frame's worth of thumb drag, spent here and not in the pointer
+            // handler, so look moves at match rate rather than at touch rate.
+            if (tt.lookDX || tt.lookDY) {
+                this._applyLook(tt.lookDX, tt.lookDY);
+                tt.lookDX = tt.lookDY = 0;
+            }
             this._move(dt);
             this._reloadTick(nowSec);
             // regen
@@ -485,21 +520,36 @@ export class Player {
             sprinting: this.isSprinting,
             speed: Math.hypot(this.velocity.x, this.velocity.z),
             grounded: this.onGround,
-            firing: this.mouseDown && this.mag.ammo > 0 && !this.mag.reloading
+            firing: this.firing && this.mag.ammo > 0 && !this.mag.reloading
         });
     }
 
     _move(dt) {
-        this.isADS = this.mouseRight && !this.mag.reloading && this.vm.switchT === 0;
-        const wantSprint = (this.keys['ShiftLeft'] || this.keys['ShiftRight']) &&
-            !this.isADS && !this.isCrouching && (this.keys['KeyW'] || this.keys['KeyA'] || this.keys['KeyD']);
+        const t = this.touch;
+        this.isADS = (this.mouseRight || t.ads) && !this.mag.reloading && this.vm.switchT === 0;
+        const pushing = t.moveX !== 0 || t.moveY !== 0;
+        // `t.sprint` is the stick pushed to its rim (touch.js adds the hysteresis);
+        // `t.sprintBtn` is the explicit button, for a run you can hold while the
+        // other thumb is busy.
+        const wantSprint = ((this.keys['ShiftLeft'] || this.keys['ShiftRight']) ||
+            t.sprint || t.sprintBtn) &&
+            !this.isADS && !this.isCrouching &&
+            (this.keys['KeyW'] || this.keys['KeyA'] || this.keys['KeyD'] || pushing);
         this.isSprinting = wantSprint && this.onGround;
 
         if (this.keys['ControlLeft']) this.isCrouching = true;
 
-        const maxSpeed = this.isCrouching ? this.crouchSpeed
+        let maxSpeed = this.isCrouching ? this.crouchSpeed
             : this.isSprinting ? this.sprintSpeed
             : this.isADS ? this.walkSpeed * 0.55 : this.walkSpeed;
+        // An analog stick is a throttle, not a switch: pushing it halfway walks,
+        // pushing it the rest of the way runs, so a thumb can creep up on an
+        // angle without either full sprint or full stop. The keyboard has no such
+        // thing, which is why this lives in the touch branch of the input mix.
+        const throw01 = Math.hypot(t.moveX, t.moveY);
+        if (!this.isCrouching && !this.isADS && !this.isSprinting && throw01 > 0.02)
+            maxSpeed = this.walkSpeed + (this.sprintSpeed - this.walkSpeed)
+                * Math.min(1, Math.max(0, (throw01 - 0.62) / 0.38));
 
         const fx = -Math.sin(this.yaw), fz = -Math.cos(this.yaw);
         const rx = Math.cos(this.yaw), rz = -Math.sin(this.yaw);
@@ -508,6 +558,11 @@ export class Player {
         if (this.keys['KeyS']) { wx -= fx; wz -= fz; }
         if (this.keys['KeyD']) { wx += rx; wz += rz; }
         if (this.keys['KeyA']) { wx -= rx; wz -= rz; }
+        if (pushing) {
+            // Stick up is forward, so the same basis the keys use.
+            wx += fx * -t.moveY + rx * t.moveX;
+            wz += fz * -t.moveY + rz * t.moveX;
+        }
         const wl = Math.hypot(wx, wz);
         if (wl > 0) { wx /= wl; wz /= wl; }
 
@@ -519,12 +574,16 @@ export class Player {
             this.velocity.x *= f; this.velocity.z *= f;
         }
 
-        if (this.keys['Space'] && this.onGround) {
+        if ((this.keys['Space'] || t.jump) && this.onGround) {
             this.velocity.y = this.jumpVel;
             this.onGround = false;
             this._airborne = true;
             playJump();
         }
+        // A jump is a tap, not a held key: the pulse is spent whether or not it
+        // took off, or the first clear frame of ground after landing would launch
+        // you again for a press the player let go of long ago.
+        if (t.jump) t.jump = false;
 
         // integrate + resolve
         this.position.x += this.velocity.x * dt;

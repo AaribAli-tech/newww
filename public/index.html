@@ -2,11 +2,12 @@
 <html lang="en">
 <head>
 <meta charset="UTF-8">
-<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0,
+      user-scalable=no, viewport-fit=cover">
 <title>NUKETOWN</title>
 
-<link rel="stylesheet" href="/css/styles.3cebe0eac4.css">
-<link rel="preload" as="script" crossorigin href="/js/game.335ba8759c.js">
+<link rel="stylesheet" href="/css/styles.4394d11c7d.css">
+<link rel="preload" as="script" crossorigin href="/js/game.fc05941de5.js">
 <link rel="preload" as="font" type="font/woff2" crossorigin href="/fonts/rajdhani-400.759a9000e4.woff2">
 <link rel="preload" as="font" type="font/woff2" crossorigin href="/fonts/teko-700.a57552efb2.woff2">
 <link rel="icon" href="/favicon.svg" type="image/svg+xml">
@@ -51,6 +52,7 @@
     <button class="menuBtn primary" id="btnStart">Deploy</button>
     <button class="menuBtn" id="btnControls">Controls</button>
     <button class="menuBtn" id="btnMute">Sound: On</button>
+    <button class="menuBtn touchRow" id="menuFull" type="button">Fullscreen</button>
   </div>
   <div id="menuFoot">Nevada Atomic Test Site &nbsp;•&nbsp; 1962</div>
 </div>
@@ -90,6 +92,29 @@
       <label>Sensitivity</label>
       <input type="range" id="sensRange" min="20" max="400" value="100">
       <output id="sensOut">1.00</output>
+    </div>
+    <div class="rowSet touchRow">
+      <label>Touch aim speed</label>
+      <input type="range" id="touchSensRange" min="40" max="300" value="115">
+      <output id="touchSensOut">1.15</output>
+    </div>
+    <div class="rowSet touchRow">
+      <label>Controls size</label>
+      <input type="range" id="ctrlSizeRange" min="80" max="140" value="100">
+      <output id="ctrlSizeOut">100%</output>
+    </div>
+    <div class="rowSet touchRow">
+      <label>Controls opacity</label>
+      <input type="range" id="ctrlOpacityRange" min="25" max="95" value="50">
+      <output id="ctrlOpacityOut">50%</output>
+    </div>
+    <div class="rowSet touchRow">
+      <label>Aim button</label>
+      <div class="diffSeg" id="adsModeSeg">
+        <button type="button" data-mode="tap">Tap to hold aim</button>
+        <button type="button" data-mode="hold">Hold to aim</button>
+      </div>
+      <output class="note">Tap leaves the scope in until you tap again.</output>
     </div>
     <div class="rowSet">
       <label>Field of view</label>
@@ -203,19 +228,32 @@
 </div>
 
 
-<!-- the phone/tablet gate: this build is mouse-driven, so we say so plainly -->
-<div id="notMobile" role="alertdialog" aria-label="Not available on mobile">
-  <div class="nmCard">
-    <h2>Not available on mobile</h2>
-    <p>
-      NUKETOWN is built around a mouse: pointer-locked aim, a held trigger, four
-      weapon keys. A finger on glass cannot do that justice, so there is no touch
-      version to fall back to &mdash; this is a computer game.
-    </p>
-    <div class="nmKeys">
-      <kbd>W A S D</kbd><kbd>MOUSE AIM</kbd><kbd>LMB FIRE</kbd><kbd>R RELOAD</kbd><kbd>ESC PAUSE</kbd>
-    </div>
-    <p class="nmGo">Open this link on a laptop or desktop to play</p>
+<!-- ════════ TOUCH HUD (shown only on touch devices; see touch.js) ════════
+     The zones are invisible; the stick is drawn wherever the left thumb lands.
+     Sizes and positions all live in the #touchUI block of the stylesheet. -->
+<div id="touchUI" aria-hidden="true">
+  <div id="stickZone" class="tz"></div>
+  <div id="lookZone" class="tz"></div>
+  <div id="stick"><i id="stickKnob"></i></div>
+  <button class="tbtn" id="tFire" type="button"><span>&#9679;</span>FIRE</button>
+  <button class="tbtn" id="tFire2" type="button"><span>&#9679;</span></button>
+  <button class="tbtn" id="tAds" type="button"><span>&#9678;</span></button>
+  <button class="tbtn" id="tJump" type="button"><span>&#8613;</span></button>
+  <button class="tbtn" id="tCrouch" type="button"><span>&#8615;</span></button>
+  <button class="tbtn" id="tReload" type="button"><span>&#8635;</span></button>
+  <button class="tbtn" id="tSwap" type="button"><span>&#8646;</span></button>
+  <button class="tbtn" id="tSprint" type="button"><span>&#10148;</span></button>
+  <button class="tbtn" id="tBoard" type="button"><span>&#9776;</span></button>
+  <button class="tbtn hide" id="tSkip" type="button"><span>&#9197;</span></button>
+  <button class="tbtn" id="tUp" type="button"><span>&#9650;</span></button>
+  <button class="tbtn" id="tDown" type="button"><span>&#9660;</span></button>
+  <button class="tbtn" id="tNext" type="button"><span>&#9197;</span></button>
+  <button class="tbtn" id="tFull" type="button"><span>&#9974;</span></button>
+</div>
+
+<div id="rotate"><i>&#8635;</i><b>Turn your phone</b>
+  <span>NUKETOWN plays sideways &nbsp;•&nbsp; tap the fullscreen arrow to lock it</span></div>
+
   </div>
 </div>
 
@@ -280,6 +318,6 @@
   </div>
 </div>
 
-<script type="module" src="/js/game.335ba8759c.js"></script>
+<script type="module" src="/js/game.fc05941de5.js"></script>
 </body>
 </html>

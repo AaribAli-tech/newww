@@ -923,7 +923,8 @@ group('gun game — one gun at a time until 75');
     const sv = await readFile(new URL('../scripts/serve.mjs', import.meta.url), 'utf8');
     const au = await readFile(new URL('../src/js/audio.js', import.meta.url), 'utf8');
     ok('a disabled killstreak is refused at the gate, not only in the HUD',
-        /canUse\(id\) \{ return this\.isEnabled\(id\) && this\.progress\(id\)\.ready/.test(ks));
+        /canUse\(id\) \{[\s\S]{0,320}?return this\.isEnabled\(id\) && this\.progress\(id\)\.ready;/.test(ks)
+        && /if \(this\.nukeActive\) return false;/.test(ks));
     ok('and a reward the mode removed is explained, not promised or hidden',
         /\$\{label\} OFF IN THIS MODE/.test(mj) && /\$\{label\} ALREADY USED/.test(mj));
     ok('every HTML page revalidates, not just the root one',
@@ -1017,13 +1018,19 @@ group('map scale — geometry, collision, tables and textures move together');
     ok('the fog reaches across the wider ground',
         /new THREE\.Fog\(0xcfc4ac, 110 \* MAP_SCALE, Math\.min\(360 \* MAP_SCALE, VIEW_FAR \* 0\.92\)\)/.test(mj)
         && 110 * U.MAP_SCALE > 150, 'the street stays clear of haze, the horizon does not');
-    ok('the spotter plane is gone, and nothing left behind pretends it is there',
-        !/uav/i.test(ks.replace(/^\/\/.*$/gm, ''))
-        && !/uav/i.test(await readFile(new URL('../src/js/player.js', import.meta.url), 'utf8'))
-        && !/uav/i.test(await readFile(new URL('../src/js/hud.js', import.meta.url), 'utf8'))
-        && !/uav/i.test(await readFile(new URL('../src/index.html', import.meta.url), 'utf8'))
-        && /export const STREAKS = \[\n    \{ id: 'air'/.test(ks),
-        'no key, no chip, no minimap tag, no dead code');
+    ok('the UAV is a reward again, and it is the radar that earns it',
+        /\{ id: 'uav', label: 'UAV', need: 4, mode: 'streak', key: 'KeyZ'/.test(ks)
+        && /get revealing\(\) \{ return this\.uavTime > 0; \}/.test(ks)
+        && /this\.uavTime = 20;/.test(ks), '4 kill streak, 20 s of radar');
+    ok('and the minimap only shows them because of it',
+        /_minimap\(player, bots, reveal = false\)/.test(hud)
+        && /if \(!friendly && !flashed && !solo && !reveal\) continue;/.test(hud)
+        && /killstreaks\.revealing/.test(hud),
+        'the radar is a map of where people were, until the UAV says otherwise');
+    ok('the drone is in the air while the radar is up, and leaves when it ends',
+        /_uav\(\) \{[\s\S]{0,600}?this\.uavTime = 20;/.test(ks)
+        && /if \(this\.uavTime > 0\) \{[\s\S]{0,900}?this\.ctx\.scene\.remove\(this\.uavModel\)/.test(ks)
+        && /function makeDroneModel\(\)/.test(ks));
     ok('the fog finishes inside the far plane, so it never fades into a clipped edge', (() => {
         const far = Number((mj.match(/const VIEW_FAR = (\d+);/) || [])[1]);
         const camUsesFar = /PerspectiveCamera\(78,[^)]*, VIEW_FAR\);/.test(mj);
@@ -1466,13 +1473,22 @@ group('crouch, the graphics driver, and nothing floating');
         /const treadW = \(kind === 'jeep' \? 2\.0 : 1\.95\) \/ 2 - 0\.055;/.test(map)
         && /wheel\(x \+ ow \* treadW, 0\.36, z \+ ol \* \(treadL \/ 1\.45\)/.test(map)
         && !/wheel\(x \+ ol, 0\.36, z \+ ow \* 0\.92/.test(map), 'no typed-in track width that can drift from the shell');
-    ok('a streak key is bound in exactly one place, so one press is one strike', await (async () => {
+    // Every reward the HUD advertises has to be reachable. The chips print `st.key`
+    // and for a while nothing listened for any of them: you earned the UAV, pressed
+    // its key, and nothing happened at all.
+    ok('every killstreak key in the table is bound, in exactly one place', await (async () => {
         const ply = await readFile(new URL('../src/js/player.js', import.meta.url), 'utf8');
         const mj = await readFile(new URL('../src/js/main.js', import.meta.url), 'utf8');
-        const bound = id => (ply.match(new RegExp(`e\\.code === '${id}'[\\s\\S]{0,90}ctx\\.useStreak`)) || []).length;
-        return bound('KeyZ') === 0 && bound('KeyX') === 1 && bound('KeyV') === 1
-            && !/case 'Key[ZXV]':/.test(mj) && !/'KeyZ'/.test(ply);
-    })(), 'X and V reach tryStreak once each, and the dead Z binding is gone');
+        const ksrc = await readFile(new URL('../src/js/killstreaks.js', import.meta.url), 'utf8');
+        const table = [...ksrc.matchAll(/\{ id: '(\w+)',[^}]*key: '(Key\w)'/g)].map(m => ({ id: m[1], key: m[2] }));
+        if (table.length < 3) return false;
+        // the binding walks the same table, so a new reward is reachable by existing
+        if (!/for \(const st of STREAKS\)[\s\S]{0,160}?tryStreak\(st\.id\)/.test(mj)) return false;
+        // and the old fixed bindings are gone, or X would fire twice
+        const fixed = table.filter(t => new RegExp(`e\\.code === '${t.key}'`).test(ply)).length;
+        return fixed === 0 && !/'KeyZ'/.test(ply)
+            && table.every(t => t.id && t.key);
+    })(), 'Z, X and V all reach tryStreak through the table');
 
     // Firing a streak calls audio, and the harness has no audio hardware, so node
     // gets just enough of a WebAudio to let the effect code run to completion.
@@ -1949,6 +1965,207 @@ group('crouch, the graphics driver, and nothing floating');
         return bad.length === 0 ? true : (bad.slice(0, 4).join(' · ') + ` — ${bad.length} unsupported`);
     })());
 
+    // The ladder itself, from the player's side: earn it, press its key, see it fire.
+    ok('the kills you earn are the kills that arm the reward', await (async () => {
+        const { Killstreaks, STREAKS } = await import('../src/js/killstreaks.js');
+        const T = await import('three');
+        const player = { killStreak: 0, matchKills: 0, position: { x: 0, y: 4, z: 0 } };
+        const fired = [];
+        const ks2 = new Killstreaks({
+            scene: new T.Scene(),
+            effects: { explosion() { }, tracer() { } },
+            hud: { banner: (...a) => fired.push(a[0]) },
+            getBots: () => [{ alive: false, takeDamage: () => true, position: { x: 0, y: 0, z: 0 } }],
+            player
+        });
+        const at = n => { player.killStreak = n; player.matchKills = n; };
+        at(3);
+        const before = ks2.progress('uav').ready;
+        at(4);
+        const armed = ks2.progress('uav').ready;
+        const used = ks2.use('uav');
+        const revealing = ks2.revealing;
+        const again = ks2.canUse('uav');                      // one sweep at a time
+        const airAt4 = ks2.progress('air').ready;
+        at(7);
+        const airAt7 = ks2.progress('air').ready;
+        at(15);
+        const nukeAt15 = ks2.progress('nuke').ready;
+        return before === false && armed === true && used === true && revealing === true
+            && again === false && airAt4 === false && airAt7 === true && nukeAt15 === true
+            && STREAKS.every(x => x.need > 0 && x.key && x.label);
+    })(), '4 kills arms the UAV, 7 the airstrike, 15 the nuke');
+
+
+}
+
+
+// ── the touch HUD: markup, stylesheet scope, and the wiring in main.js ──────
+// The behaviour itself is exercised against the real classes by
+// `npm run test:touch`; what this section can prove cheaply is the contract the
+// two files have with each other, and — the part that regresses silently — that a
+// mouse user still gets exactly the page they had before.
+group('touch — the phone HUD and the desktop it must not disturb');
+{
+    const html = await readFile(new URL('../src/index.html', import.meta.url), 'utf8');
+    const tjs = await readFile(new URL('../src/js/touch.js', import.meta.url), 'utf8');
+    const pjs = await readFile(new URL('../src/js/player.js', import.meta.url), 'utf8');
+    const mjs = await readFile(new URL('../src/js/main.js', import.meta.url), 'utf8');
+    const css = /<style>([\s\S]*?)<\/style>/.exec(html)[1];
+
+    // 1 · every widget the layer drives has to exist, and be styled.
+    const ids = [...new Set([...tjs.matchAll(/\$\('([A-Za-z0-9_]+)'\)/g)].map(m => m[1]))];
+    ok('the touch layer drives a full HUD', ids.length >= 18, `${ids.length} widgets`);
+    const noEl = ids.filter(i => !html.includes(`id="${i}"`));
+    ok('every element touch.js looks up exists in the page', noEl.length === 0, noEl.join(' '));
+    const noCss = ids.filter(i => !css.includes(`#${i}`));
+    ok('and every one of them has a rule of its own', noCss.length === 0, noCss.join(' '));
+
+    // 2 · scope. The whole touch section must be unreachable without the class,
+    // except the page-lock block, which is inside a coarse-pointer media query on
+    // purpose (html cannot be selected through a class on body).
+    // The touch stylesheet runs from its banner to the disabled-button rules that
+    // predate it; the section boundary is why this reads as a range and not a scan
+    // of the whole file.
+    const sec = css.slice(css.indexOf('TOUCH: THE HUD'), css.indexOf('.menuBtn:disabled'));
+    // A selector is safe if it carries the touch class or a touch-only prefix, OR if
+    // the element it names lives inside #touchUI — that container is display:none
+    // until the touch layer turns it on, which is what keeps a desktop clear.
+    const uiOpen = html.indexOf('<div id="touchUI"');
+    const uiBody = html.slice(uiOpen, html.indexOf('\n</div>', uiOpen));
+    const touchIds = new Set([...uiBody.matchAll(/id="([A-Za-z0-9_]+)"/g)].map(m => m[1]));
+    ok('every touch widget lives inside the container that hides them',
+        touchIds.size >= 18, `${touchIds.size} widgets in #touchUI`);
+    const EXEMPT = new Set(['html', 'html,body', 'body', 'input', '#menu', '#panel', '#pause',
+        '#end', '#diffGate', '#board', '#loader']);
+    const loose = [];
+    for (const raw of sec.split('\n')) {
+        const line = raw.trim();
+        if (!line || line.startsWith('@') || line.startsWith('/*') || line.startsWith('*')) continue;
+        const at = /^([^{]+)\{/.exec(line);
+        if (!at) continue;
+        for (const sel of at[1].split(',')) {
+            const s = sel.trim();
+            if (!s || /^\d/.test(s)) continue;                    // keyframe step
+            if (/body\.touch|#touchUI|\.tbtn|#rotate/.test(s)) continue;
+            // `#stick.on`, `#tSkip.hide` — the id is what has to be inside the layer.
+            if (s.startsWith('#') && touchIds.has(s.slice(1).replace(/[.:][\s\S]*$/, ''))) continue;
+            if (/^body:not\(\.touch\)/.test(s)) continue;      // the desktop guard
+            if (EXEMPT.has(s)) continue;
+            loose.push(s);
+        }
+    }
+    ok('no touch rule can reach a mouse and keyboard player', loose.length === 0, loose.slice(0, 4).join(' · '));
+
+    // 3 · the sizes the brief asked for, read off the stylesheet.
+    const clampOf = v => {
+        const m = new RegExp(`--${v}:calc\\(clamp\\((\\d+)px,([\\d.]+)vmin,(\\d+)px\\)`).exec(css);
+        return m ? { lo: +m[1], vmin: +m[2], hi: +m[3], text: m[0].slice(m[0].indexOf('clamp(') + 6, m[0].indexOf(') *')) } : null;
+    };
+    const base = clampOf('base'), fire = clampOf('fire'), mini = clampOf('mini');
+    ok('the stick base is 90-100 px', base && base.lo >= 88 && base.hi <= 104, base && `${base.lo}-${base.hi}px`);
+    ok('the fire button is 60-68 px', fire && fire.lo >= 58 && fire.hi <= 70, fire && `${fire.lo}-${fire.hi}px`);
+    ok('the arc buttons are 38-44 px', mini && mini.lo >= 36 && mini.hi <= 46, mini && `${mini.lo}-${mini.hi}px`);
+    ok('every control is vmin-sized with a floor and a ceiling', base && fire && mini && base.vmin > 0 && fire.vmin > 0 && mini.vmin > 0);
+    ok('the left trigger is the smaller one', /#tFire2\{[\s\S]{0,200}?width:calc\(var\(--fire\) \*\.[1-9]\d?\)/.test(css)
+        || /#tFire2\{[\s\S]{0,220}?width:calc\(var\(--fire\) \* \.\d+\)/.test(css));
+    ok('on a phone the readouts move to the top-right column, clear of the thumbs',
+        /body\.touch #brWrap\{top:calc\(\d+px \+ env\(safe-area-inset-top,0px\)\);[\s\S]{0,120}?bottom:auto/.test(css)
+        && /body\.touch #slots\{top:calc\(\d+px \+ env\(safe-area-inset-top,0px\)\);/.test(css)
+        && /body\.touch #streakCol\{top:calc\(\d+px \+ env\(safe-area-inset-top,0px\)\);[\s\S]{0,80}?bottom:auto/.test(css)
+        && /body\.touch #killfeed\{top:calc\(\d+px \+ env\(safe-area-inset-top,0px\)\);/.test(css),
+        'feed, ammo, weapons, streaks — one column, above the arc');
+    const stickR = +(/const STICK_R = (\d+)/.exec(tjs) || [0, 0])[1];
+    ok('the stick radius is half the drawn base, in both files',
+        base && Math.abs(stickR * 2 - base.lo) <= 6, `STICK_R ${stickR} → ${stickR * 2}px vs a ${base && base.lo}px base`);
+
+    // 4 · the page itself: no zoom, no rubber-band, no 300 ms tap, no portrait play.
+    const vp = /<meta name="viewport" content="([^"]*)"(\s|\n)?[^"]*"?/.exec(html);
+    const vpAll = /viewport" content="([\s\S]{0,160}?)">/.exec(html);
+    const vpText = (vpAll && vpAll[1]) || (vp && vp[1]) || '';
+    ok('the viewport forbids pinch-zoom and takes the notch',
+        /user-scalable=no/.test(vpText) && /viewport-fit=cover/.test(vpText) && /initial-scale=1(\.0)?/.test(vpText),
+        vpText.replace(/\s+/g, ' ').trim());
+    ok('the phone page cannot be dragged or selected', /overscroll-behavior:none/.test(css)
+        && /-webkit-touch-callout:none/.test(css) && /user-select:none/.test(css)
+        && /touch-action:none/.test(css));
+    ok('it sizes to the visual viewport, not the URL bar', /min-height:100dvh/.test(css));
+    ok('portrait says "rotate" instead of playing sideways',
+        /\(orientation:portrait\)/.test(css) && html.includes('id="rotate"')
+        && /body\.touch #rotate\{display:grid\}/.test(css));
+    ok('and that overlay is CSS, not a resize handler', !/classList\.(add|toggle|remove)\('portrait'\)/.test(tjs + mjs));
+    ok('buttons swallow the browser tap', /-webkit-tap-highlight-color:transparent/.test(css));
+    ok('every control releases on pointercancel too',
+        (tjs.match(/pointercancel/g) || []).length >= 4 && /lostpointercapture/.test(tjs));
+
+    // 5 · main.js: how the layer is mounted, and what a phone is spared.
+    ok('the mobile-only lock-out is gone from the source, not hidden in CSS',
+        !/blockMobile|NOT_ON_MOBILE|notMobile/.test(html + tjs + pjs + mjs));
+    ok('a phone is never asked for pointer lock', /if \(IS_TOUCH\) \{/.test(mjs));
+    ok('the controls come up only over live play with no menu',
+        /visible: \(\) => state === 'playing' && !menuOpen\(\)/.test(mjs));
+    ok('the loop feeds the touch state before the player reads it',
+        /if \(touchCtl\) \{[\s\S]{0,120}touchCtl\.frame\(\);[\s\S]{0,120}player\.locked = !menuOpen\(\)/.test(mjs));
+    ok('the device pixel ratio is capped on a phone', /IS_TOUCH \? 1\.5 : Infinity/.test(mjs));
+    ok('and the auto-quality loop is still the one that saves the frame time',
+        /adaptResolution\(dt\)/.test(mjs) && !/if \(!IS_TOUCH[\s\S]{0,40}adaptResolution/.test(mjs));
+    ok('?touch=0 / ?touch=1 still overrides the media query',
+        /\[\?&\]touch=1/.test(tjs) && /\[?&]touch=0/.test(tjs) && /\(hover: ?none\) and \(pointer: coarse\)/.test(tjs));
+    ok('the body class is added by the layer, not by a UA sniff',
+        /document\.body\.classList\.add\('touch'\)/.test(mjs) && !/userAgent/.test(tjs));
+
+    // 6 · the settings the brief asked for, and their defaults.
+    for (const k of ['touchSens', 'ctrlSize', 'ctrlOpacity', 'adsMode']) {
+        // either written out (the aim row has its own handler) or driven by the
+        // shared row-tuple loop, which names the key as a string.
+        ok(`"${k}" is a persisted setting`, new RegExp(`\\b${k}: `).test(mjs)
+            && (mjs.includes(`settings.${k}`) || mjs.includes(`'${k}'`)));
+        const row = { touchSens: 'touchSensRange', ctrlSize: 'ctrlSizeRange',
+            ctrlOpacity: 'ctrlOpacityRange', adsMode: 'adsModeSeg' }[k];
+        ok('and it has a control in the touch-only settings block',
+            html.includes(`id="${row}"`) && html.includes('touchRow')
+            && (mjs.includes(`$('${row}')`) || mjs.includes(`'${row}'`)), row);
+    }
+    ok('the keyboard hints never show on a phone, and the touch rows never on a desktop',
+        /body:not\(\.touch\) \.touchRow\{display:none\}/.test(css)
+        && /body\.touch #panel \.kv\{display:none\}/.test(css)
+        && (html.match(/class="rowSet touchRow"/g) || []).length >= 3);
+    ok('the phone gets its own skip button instead of two',
+        /body\.touch #skipRound\{display:none\}/.test(css) && html.includes('id="tSkip"'));
+
+    // 7 · the HUD compaction the short landscape screen needs.
+    ok('the killfeed stops at three lines on a phone, two on a tiny one',
+        /body\.touch #killfeed \.kf:nth-child\(n\+4\)\{display:none\}/.test(css)
+        && /body\.touch #killfeed \.kf:nth-child\(n\+3\)\{display:none\}/.test(css));
+    ok('the minimap shrinks for a phone', /body\.touch #miniWrap\{[\s\S]{0,160}?width:118px;height:118px\}/.test(css));
+    ok('keyboard-only hints go quiet on a phone',
+        /body\.touch #reloadHint, body\.touch #pauseHint, body\.touch #ntHint\{display:none\}/.test(css)
+        && /body\.touch \.stk \.ky\{display:none\}/.test(css));
+    ok('the streak chips are above the look pad so a tap lands',
+        /body\.touch #streakCol\{z-index:130/.test(css) && /body\.touch #gameBtns\{[^}]*z-index:130/.test(css)
+        && /body\.touch \.stk\{[^}]*pointer-events:auto/.test(css));
+    ok('the menu is two columns on a short screen',
+        /body\.touch #menu \.menuInner\{display:grid;grid-template-columns:minmax\(0,1fr\) auto/.test(css));
+    ok('menus scroll instead of being cut off', /body\.touch \.card\{[^}]*overflow:auto/.test(css)
+        && /body\.touch #board \.bwrap\{[^}]*overflow:auto/.test(css));
+    ok('the look pad is the right 60%, the stick the left 40%',
+        /#stickZone\{left:0;width:40%\}/.test(css) && /#lookZone\{left:40%;right:0\}/.test(css));
+    ok('opacity defaults to a translucent HUD and is capped below solid',
+        /--topaque:\.5;/.test(css) && /clamp\(settings\(\)\.ctrlOpacity \?\? 0\.5, 0\.25, 0\.95\)/.test(tjs));
+
+    // 8 · player.js reads the touch flags IN ADDITION to the mouse, never instead.
+    ok('the stick, the triggers and the keys are all read in the movement code',
+        ['t.moveX', 't.moveY', 't.sprint', 't.sprintBtn', 't.ads', 't.jump', 't.lookDX', 't.lookDY']
+            .every(k => pjs.includes(k)));
+    ok('firing is mouse OR touch', /get firing\(\) \{ return this\.mouseDown \|\| this\.touch\.fire; \}/.test(pjs));
+    ok('aiming is mouse OR touch', /this\.mouseRight \|\| t\.ads/.test(pjs));
+    ok('the keys still move the player on a desktop', /this\.keys\['KeyW'\]/.test(pjs));
+    ok('one look function serves mouse and thumb', (pjs.match(/_applyLook\(/g) || []).length >= 3);
+    ok('a death drops every held touch control',
+        /this\.touch\.fire = false;[\s\S]{0,120}this\.touch\.ads = false;[\s\S]{0,120}this\.touch\.moveX = this\.touch\.moveY = 0/.test(pjs));
+    ok('the touch object is a plain state bag, not an event system',
+        /this\.touch = \{[\s\S]{0,240}?moveX: 0/.test(pjs));
+    ok('vibration confirms a burst, not every shot', /if \(!buzzedThisBurst\)/.test(tjs) && (tjs.match(/buzz\(/g) || []).length <= 6);
 }
 
 console.log(`\n${fail === 0 ? '✓' : '✗'} ${pass} passed, ${fail} failed\n`);
