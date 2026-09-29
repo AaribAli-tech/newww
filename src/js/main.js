@@ -373,9 +373,14 @@ function setupRenderer() {
     // one need the far end of the fog to sit at the same metre-marks relative to
     // the ground, so both numbers scale with it. Without this the far houses would
     // simply dissolve on a bigger map.
-    scene.fog = new THREE.Fog(0xcfc4ac, 110 * MAP_SCALE, 360 * MAP_SCALE);
+    // One number for how far anything can be drawn. The fog used to reach 360 map
+    // units, which on a grown map is further than the camera can see — so the haze
+    // did nothing but thin out and the desert's edge sat there crisp. Tie the two
+    // together and the fog always finishes inside the far plane.
+    const VIEW_FAR = 700;
+    scene.fog = new THREE.Fog(0xcfc4ac, 110 * MAP_SCALE, Math.min(360 * MAP_SCALE, VIEW_FAR * 0.92));
 
-    camera = new THREE.PerspectiveCamera(78, window.innerWidth / window.innerHeight, 0.06, 700);
+    camera = new THREE.PerspectiveCamera(78, window.innerWidth / window.innerHeight, 0.06, VIEW_FAR);
     scene.add(camera);
 
     // A lost WebGL context is Chrome taking the canvas away — a driver reset, a
@@ -1045,9 +1050,10 @@ function toMenu() {
     // The streaks own things that outlive a match unless they are told to stop:
     // the nuke whiteout and bloom are graded every frame from streak state, the
     // countdown overlay is only ever cleared by the flash that follows it, and
-    // the UAV keeps orbiting the town. Quitting mid-nuke used to leave the menu
+    // and the smoke from the blast keeps drifting. Quitting mid-nuke used to leave the menu
     // behind a white fog with "5" in the middle of it.
     if (streaks) streaks.reset();
+    if (effects.clearParticles) effects.clearParticles();
     if (hud.abortNuke) hud.abortNuke();
 }
 
@@ -1066,6 +1072,7 @@ function endMatch() {
     player.paused = true;
     releaseCursor();
     if (streaks) streaks.reset();
+    if (effects.clearParticles) effects.clearParticles();
     if (hud.abortNuke) hud.abortNuke();
     hud.hideDeath();
     // The result card is the end of the flight: give the camera back so the frozen
@@ -1113,12 +1120,12 @@ function registerKill(bot, weaponLabel, head, fromStreak) {
         milestoneProgress(player.killStreak));
 
     // announce newly available rewards
-    for (const s of ['uav', 'air', 'nuke']) {
+    for (const s of ['air', 'nuke']) {
         const p = streaks.progress(s);
         if (p.ready && !streaks.announced?.[s]) {
             streaks.announced = streaks.announced || {};
             streaks.announced[s] = true;
-            const meta = { uav: ['UAV READY', '#67c6ff', 'Press Z'], air: ['AIRSTRIKE READY', '#ffb02e', 'Press X'], nuke: ['☢ TACTICAL NUKE READY ☢', '#FF3B15', 'Press V to end this'] }[s];
+            const meta = { air: ['AIRSTRIKE READY', '#ffb02e', 'Press X'], nuke: ['☢ TACTICAL NUKE READY ☢', '#FF3B15', 'Press V to end this'] }[s];
             hud.banner(meta[0], meta[1], meta[2]);
         }
     }
@@ -1396,7 +1403,6 @@ function loop(ts) {
         mode: gamemode,
         teamA: gamemode.teamAScore, teamB: gamemode.teamBScore,
         timeLeft: gamemode.timeRemaining,
-        uav: streaks.uavOnline,
         killstreaks: streaks,
         scopeAmount: vm.scopeAmount
     });

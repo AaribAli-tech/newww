@@ -1,44 +1,24 @@
 // ============================================================================
-// killstreaks.js — UAV, Airstrike and the Tactical Nuke.
+// killstreaks.js — the Airstrike and the Tactical Nuke.
 //
-//   UAV       — 4 kill streak   — enemies painted on the minimap for 30 s
+//   The spotter plane is gone rather than fixed. It asked for four kills, flew
+//   an aircraft in a circle, and the only thing it gave back was a handful of
+//   dots on a 120-pixel map, over dots you can already see out of your eyes.
+//   A reward has to change the fight; this one did not.
 //   AIRSTRIKE — 7 kill streak   — bomb run down the street
 //   NUKE      — 15 kills (match total) — wipes the enemy team, ends the round
 // ============================================================================
 import * as THREE from 'three';
 import * as M from './materials.js';
 import { MAP_SCALE, MAP_RECT, clamp } from './utils.js';
-import { playUAV, playJetPass, playExplosion, playNukeSiren, playNukeBlast, duckAudio } from './audio.js';
+import { playJetPass, playExplosion, playNukeSiren, playNukeBlast, duckAudio } from './audio.js';
 
 export const STREAKS = [
-    { id: 'uav', label: 'UAV', need: 4, mode: 'streak', key: 'KeyZ', icon: '◈' },
     { id: 'air', label: 'AIRSTRIKE', need: 7, mode: 'streak', key: 'KeyX', icon: '✈' },
     { id: 'nuke', label: 'TACTICAL NUKE', need: 15, mode: 'total', key: 'KeyV', icon: '☢' }
 ];
 
 // ── simple aircraft silhouettes ─────────────────────────────────────────────
-function makeUAVModel() {
-    const g = new THREE.Group();
-    const body = M.plain(0x3d4348, 0.6, 0.4);
-    const dark = M.plain(0x1c1f22, 0.5, 0.3);
-    const fuselage = new THREE.Mesh(new THREE.CylinderGeometry(0.28, 0.16, 4.2, 10), body);
-    fuselage.rotation.x = Math.PI / 2; g.add(fuselage);
-    const nose = new THREE.Mesh(new THREE.SphereGeometry(0.3, 10, 8), body);
-    nose.position.z = -2.0; nose.scale.z = 1.6; g.add(nose);
-    const wing = new THREE.Mesh(new THREE.BoxGeometry(9.5, 0.12, 0.85), body);
-    wing.position.set(0, 0.1, 0.2); g.add(wing);
-    const tail = new THREE.Mesh(new THREE.BoxGeometry(2.6, 0.1, 0.5), body);
-    tail.position.set(0, 0.3, 1.9); g.add(tail);
-    for (const s of [-1, 1]) {
-        const fin = new THREE.Mesh(new THREE.BoxGeometry(0.1, 0.9, 0.6), body);
-        fin.position.set(s * 1.2, 0.6, 1.9); g.add(fin);
-    }
-    const pod = new THREE.Mesh(new THREE.SphereGeometry(0.22, 10, 8), dark);
-    pod.position.set(0, -0.26, -0.9); g.add(pod);
-    g.traverse(o => { if (o.isMesh) o.castShadow = true; });
-    return g;
-}
-
 function makeJetModel() {
     const g = new THREE.Group();
     const body = M.plain(0x2f3438, 0.5, 0.6);
@@ -62,25 +42,22 @@ function makeJetModel() {
 export class Killstreaks {
     constructor(ctx) {
         this.ctx = ctx;                 // {scene, effects, hud, getBots, player, gamemode}
-        this.uavTime = 0;
         this.active = [];
-        this.used = { uav: false, air: false, nuke: false };
+        this.used = { air: false, nuke: false };
         this.nukeActive = false;
         this.nukeFired = false;
     }
 
     reset() {
-        this.uavTime = 0;
-        this.used = { uav: false, air: false, nuke: false };
+        this.used = { air: false, nuke: false };
         this.nukeActive = false;
         this.nukeFired = false;
         for (const a of this.active) if (a.obj) this.ctx.scene.remove(a.obj);
         this.active.length = 0;
     }
 
-    /** Player death consumes streak-based rewards. */
+    /** Player death re-arms the rewards this life spent. */
     onPlayerDeath() {
-        this.used.uav = false;
         this.used.air = false;
     }
 
@@ -112,23 +89,9 @@ export class Killstreaks {
     use(id) {
         if (!this.canUse(id)) return false;
         this.used[id] = true;
-        if (id === 'uav') this._uav();
-        else if (id === 'air') this._airstrike();
+        if (id === 'air') this._airstrike();
         else if (id === 'nuke') this._nuke();
         return true;
-    }
-
-    get uavOnline() { return this.uavTime > 0; }
-
-    // ── UAV ─────────────────────────────────────────────────────────────────
-    _uav() {
-        this.uavTime = 30;
-        this.ctx.hud.banner('UAV ONLINE', '#67c6ff', 'Enemy positions revealed');
-        playUAV();
-        const model = makeUAVModel();
-        model.position.set(-70, 34, -30);
-        this.ctx.scene.add(model);
-        this.active.push({ kind: 'uav', obj: model, t: 0, dur: 34 });
     }
 
     // ── AIRSTRIKE ───────────────────────────────────────────────────────────
@@ -172,28 +135,10 @@ export class Killstreaks {
 
     // ── frame ───────────────────────────────────────────────────────────────
     update(dt) {
-        if (this.uavTime > 0) this.uavTime -= dt;
 
         for (let i = this.active.length - 1; i >= 0; i--) {
             const a = this.active[i];
             a.t += dt;
-
-            if (a.kind === 'uav') {
-                const k = a.t / a.dur;
-                const ang = k * Math.PI * 2.2;
-                // An ellipse around the block, so the orbit has to grow with the block:
-                // a UAV circling the old footprint would spend the match over the same
-                // three houses while the rest of the map goes unwatched.
-                // Tight enough that the drone passes over the streets rather than
-                // around the far side of the wire: at 62 m it spent the whole 30 s
-                // visible only if you stood at the fence and looked out of it.
-                a.obj.position.set(Math.cos(ang) * 40 * MAP_SCALE,
-                    34 + Math.sin(ang * 2) * 3, Math.sin(ang) * 30 * MAP_SCALE);
-                a.obj.rotation.y = -ang + Math.PI / 2;
-                a.obj.rotation.z = Math.sin(ang) * 0.25;
-                if (a.t >= a.dur) { this.ctx.scene.remove(a.obj); this.active.splice(i, 1); }
-                continue;
-            }
 
             if (a.kind === 'jet') {
                 if (a.t < 0) continue;

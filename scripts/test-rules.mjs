@@ -768,8 +768,8 @@ group('utils.js — the perimeter is a clamp, not a mesh');
         && Math.abs(U.MAP_RECT.minZ + 40 * U.MAP_SCALE) < 1e-9
         && Math.abs(U.MAP_RECT.minX + 42 * U.MAP_SCALE) < 1e-9
         && Math.abs(U.MAP_RECT.maxZ - 38 * U.MAP_SCALE) < 1e-9);
-    ok('and the map is 45% more ground, then 25% more on top of that',
-        Math.abs(U.MAP_SCALE - 1.45 * 1.25) < 1e-9
+    ok('the playable block grew 45%, then 25%, then 25% more',
+        Math.abs(U.MAP_SCALE - 1.45 * 1.25 * 1.25) < 1e-9
         && (U.MAP_RECT.maxX - U.MAP_RECT.minX) > 84 * 1.7 && (U.MAP_RECT.maxZ - U.MAP_RECT.minZ) > 78 * 1.7,
         `${U.MAP_RECT.maxX - U.MAP_RECT.minX} × ${U.MAP_RECT.maxZ - U.MAP_RECT.minZ} m of roamable ground`);
     const p = { x: 600, y: 0, z: -900 };
@@ -956,8 +956,14 @@ group('map scale — geometry, collision, tables and textures move together');
         'order matters — nodes are checked against the scaled colliders');
     ok('objects move out AND grow, so proportions survive',
         /o\.position\.multiplyScalar\(k\)/.test(map) && /o\.scale\.multiplyScalar\(k\)/.test(map));
-    ok('the sky dome is left where it is',
-        /applyWorldScale\(scene, cw, MAP_SCALE, sky\.mesh\)/.test(map) && /if \(o === skip \|\| !\(o\.isMesh/.test(map));
+    ok('the sky dome is left where it is, and so is the sand beyond the wire',
+        /applyWorldScale\(scene, cw, MAP_SCALE, sky\.mesh\)/.test(map)
+        && /if \(o === skip \|\| o\.userData\?\.nkNoScale\) continue;/.test(map)
+        && /o\.isMesh \|\| o\.isLine \|\| o\.isLineSegments \|\| o\.isPoints \|\| o\.isGroup/.test(map),
+        'and groups are in the pass, or a wheel — a group of nine meshes — stays behind'
+        && /desert\.userData\.nkNoScale = true;/.test(map)
+        && /new THREE\.PlaneGeometry\(900, 900\), M\.sand\(\)/.test(map),
+        'growing the town must not grow the empty desert around it');
     ok('collision boxes follow the meshes, not a second copy of the layout',
         /cw\.rescale\(k\)/.test(map) && /rescale\(k\) \{/.test(phy));
     ok('and the broadphase grid is rebuilt rather than trusted',
@@ -994,17 +1000,26 @@ group('map scale — geometry, collision, tables and textures move together');
         /const FREEZE_TIME = 5\.0;/.test(await readFile(new URL('../src/js/modes.js', import.meta.url), 'utf8')));
     ok('the authored rectangle is the only source of the scaled one',
         /minX: MAP_RECT_AUTHORED\.minX \* MAP_SCALE/.test(await readFile(new URL('../src/js/utils.js', import.meta.url), 'utf8')));
-    ok('the world floor is authored too, and still covers the whole map',
-        /cw\.addAABB\(-140, -1\.0, -140, 140/.test(map));
+    ok('the world floor stops just past the fence, so there is no town outside the town',
+        /cw\.addAABB\(-62, -1\.0, -62, 62, 0\.0, 62, 'ground'\)/.test(map)
+        && 62 * U.MAP_SCALE > U.MAP_RECT.maxX + 30 && 62 * U.MAP_SCALE < 200,
+        `floor to ±${(62 * U.MAP_SCALE).toFixed(0)} m against a fence at ±${U.MAP_RECT.maxX.toFixed(0)} m`);
     ok('the fog reaches across the wider ground',
-        /new THREE\.Fog\(0xcfc4ac, 110 \* MAP_SCALE, 360 \* MAP_SCALE\)/.test(mj));
-    ok('the UAV orbit grows with the block it is watching',
-        /Math\.cos\(ang\) \* 40 \* MAP_SCALE/.test(ks) && /Math\.sin\(ang\) \* 30 \* MAP_SCALE/.test(ks)
-        && 40 * U.MAP_SCALE > 62 && 30 * U.MAP_SCALE > 48,
-        'the drone crosses the streets, not the far side of the wire');
-    ok('the camera still sees past the far house',
-        /new THREE\.PerspectiveCamera\(78,[^)]*,\s*(\d+)\)/.test(mj)
-        && Number(RegExp.$1) > 360 * U.MAP_SCALE, 'far plane vs fog');
+        /new THREE\.Fog\(0xcfc4ac, 110 \* MAP_SCALE, Math\.min\(360 \* MAP_SCALE, VIEW_FAR \* 0\.92\)\)/.test(mj)
+        && 110 * U.MAP_SCALE > 150, 'the street stays clear of haze, the horizon does not');
+    ok('the spotter plane is gone, and nothing left behind pretends it is there',
+        !/uav/i.test(ks.replace(/^\/\/.*$/gm, ''))
+        && !/uav/i.test(await readFile(new URL('../src/js/player.js', import.meta.url), 'utf8'))
+        && !/uav/i.test(await readFile(new URL('../src/js/hud.js', import.meta.url), 'utf8'))
+        && !/uav/i.test(await readFile(new URL('../src/index.html', import.meta.url), 'utf8'))
+        && /export const STREAKS = \[\n    \{ id: 'air'/.test(ks),
+        'no key, no chip, no minimap tag, no dead code');
+    ok('the fog finishes inside the far plane, so it never fades into a clipped edge', (() => {
+        const far = Number((mj.match(/const VIEW_FAR = (\d+);/) || [])[1]);
+        const camUsesFar = /PerspectiveCamera\(78,[^)]*, VIEW_FAR\);/.test(mj);
+        const fogFar = Math.min(360 * U.MAP_SCALE, far * 0.92);
+        return !!far && camUsesFar && fogFar < far && fogFar > 300;
+    })(), `fog ends at ${Math.min(360 * 2.265625, 644).toFixed(0)} m, camera cuts at 700 m`);
     ok('the primitive helpers do no scaling of their own, so none can forget it',
         !/MAP_SCALE/.test(map.split('function box(')[1].split('\n}')[0])
         && !/MAP_SCALE/.test(map.split('function cylinder(')[1].split('\n}')[0])
@@ -1045,8 +1060,14 @@ group('the punch list — menus, mouse, callsign, cover and room to roam');
 
     // 1 — the nuke's whiteout used to stay on the main menu, because the grade is
     // written every frame from streak state and nothing cleared that state.
+    ok('leaving a match resets the streaks and stops every particle still alive',
+        /if \(streaks\) streaks\.reset\(\);\s*\n\s*if \(effects\.clearParticles\) effects\.clearParticles\(\);/.test(mj)
+        && (mj.match(/if \(effects\.clearParticles\) effects\.clearParticles\(\);/g) || []).length === 2
+        && /clearParticles\(\) \{\s*\n\s*this\.active\.length = 0;/.test(
+            await readFile(new URL('../src/js/effects.js', import.meta.url), 'utf8')),
+        'quit and the end card both drain the effects system');
     ok('leaving a match resets the streaks that own the screen',
-        /function toMenu\(\) \{[\s\S]{0,900}?if \(streaks\) streaks\.reset\(\);\n\s*if \(hud\.abortNuke\) hud\.abortNuke\(\);/.test(mj));
+        /function toMenu\(\) \{[\s\S]{0,900}?if \(streaks\) streaks\.reset\(\);\n\s*if \(effects\.clearParticles\) effects\.clearParticles\(\);\n\s*if \(hud\.abortNuke\) hud\.abortNuke\(\);/.test(mj));
     ok('so does the end card',
         /function endMatch\(\)[\s\S]{0,400}?if \(streaks\) streaks\.reset\(\);/.test(mj));
     ok('the nuke overlay has an abort that does not play its flash', /abortNuke\(\) \{/.test(hud));
@@ -1439,9 +1460,9 @@ group('crouch, the graphics driver, and nothing floating');
         const ply = await readFile(new URL('../src/js/player.js', import.meta.url), 'utf8');
         const mj = await readFile(new URL('../src/js/main.js', import.meta.url), 'utf8');
         const bound = id => (ply.match(new RegExp(`e\\.code === '${id}'[\\s\\S]{0,90}ctx\\.useStreak`)) || []).length;
-        return bound('KeyZ') === 1 && bound('KeyX') === 1 && bound('KeyV') === 1
-            && !/case 'Key[ZXV]':/.test(mj) && !/code === 'KeyZ'/.test(mj);
-    })(), 'Z, X and V each reach tryStreak once');
+        return bound('KeyZ') === 0 && bound('KeyX') === 1 && bound('KeyV') === 1
+            && !/case 'Key[ZXV]':/.test(mj) && !/'KeyZ'/.test(ply);
+    })(), 'X and V reach tryStreak once each, and the dead Z binding is gone');
 
     // Firing a streak calls audio, and the harness has no audio hardware, so node
     // gets just enough of a WebAudio to let the effect code run to completion.
@@ -1492,7 +1513,7 @@ group('crouch, the graphics driver, and nothing floating');
         return Math.abs(mid - (MR.maxX - 12)) < 34 && Math.abs((jets[0].dropTo - jets[0].dropFrom) / 2 - 26 * MS) < 1e-6
             && Math.abs(jets[0].obj.position.x - mid) > 26 * MS;
     })(), 'the bomb lane is centred on the caller and as wide as the grown map');
-    ok('three kills is no airstrike, four is a UAV, and the UAV is spent until you die', await (async () => {
+    ok('six kills is no airstrike, seven is, and it is spent until you die', await (async () => {
         stubAudio();
         const { Killstreaks } = await import('../src/js/killstreaks.js');
         const mk = kills => {
@@ -1503,21 +1524,21 @@ group('crouch, the graphics driver, and nothing floating');
             });
             return ks;
         };
-        const three = mk(3), four = mk(4);
-        if (three.progress('uav').ready) return false;
-        if (!four.progress('uav').ready) return false;
-        if (four.progress('air').ready) return false;
-        if (!four.use('uav')) return false;
-        if (four.use('uav')) return false;
-        if (four.progress('uav').ready) return false;
-        four.onPlayerDeath();
-        return four.progress('uav').ready === true && four.use('uav') === true;
-    })());
+        const six = mk(6), seven = mk(7);
+        if (six.progress('air').ready) return false;
+        if (!seven.progress('air').ready) return false;
+        if (seven.progress('nuke').ready) return false;
+        if (!seven.use('air')) return false;
+        if (seven.use('air')) return false;
+        if (seven.progress('air').ready) return false;
+        seven.onPlayerDeath();
+        return seven.progress('air').ready === true && seven.use('air') === true;
+    })(), 'one bomb run per life, then it re-arms');
     // The streaks were arming fine in Team Deathmatch and doing literally nothing
     // in Free For All and Gun Game, because those two modes switched all three
     // rewards off. That is a rules decision, but it was silent, and silent reads
     // as broken. This is the check that it never goes silent or fully off again.
-    ok('every mode lets you call in the UAV and the airstrike, and gates only the nuke', await (async () => {
+    ok('every mode lets you call in the airstrike, and gates only the nuke', await (async () => {
         const { createMode } = await import('../src/js/modes.js');
         const off = {};
         for (const id of ['tdm', 'ctl', 'ffa', 'gun']) {
@@ -1529,7 +1550,7 @@ group('crouch, the graphics driver, and nothing floating');
         }
         return off.tdm === '' && off.ctl === 'nuke' && off.ffa === 'nuke' && off.gun === 'nuke';
     })(), 'tdm: none off · ctl/ffa/gun: nuke only');
-    ok('earn four kills in a free-for-all and the UAV is really callable', await (async () => {
+    ok('earn seven kills in a free-for-all and the airstrike is really callable', await (async () => {
         stubAudio();
         const { createMode } = await import('../src/js/modes.js');
         const { Killstreaks } = await import('../src/js/killstreaks.js');
@@ -1537,14 +1558,13 @@ group('crouch, the graphics driver, and nothing floating');
             player: null, getBots: () => [], hud: { banner() { } }, effects: {}, scene: {}, audio: {},
         });
         const ks = new Killstreaks({
-            player: { position: { x: 0, z: 0 }, killStreak: 4, matchKills: 4, alive: true },
+            player: { position: { x: 0, z: 0 }, killStreak: 7, matchKills: 7, alive: true },
             hud: { banner() { } }, scene: { add() { }, remove() { } }, effects: {}, getBots: () => [],
             getMode: () => mode,
         });
-        return ks.progress('uav').ready === true && ks.canUse('uav') === true
-            && ks.progress('air').ready === false
+        return ks.progress('air').ready === true && ks.canUse('air') === true
             && ks.progress('nuke').ready === false && ks.canUse('nuke') === false
-            && ks.use('uav') === true;
+            && ks.use('air') === true;
     })(), 'the nuke is the only reward the free-for-all refuses');
     ok('a streak key always answers, whether it is off, spent, or not earned yet', await (async () => {
         const mj = await readFile(new URL('../src/js/main.js', import.meta.url), 'utf8');
@@ -1557,6 +1577,70 @@ group('crouch, the graphics driver, and nothing floating');
         const hud = await readFile(new URL('../src/js/hud.js', import.meta.url), 'utf8');
         return /el\.classList\.toggle\('hidden', !p\.enabled\)/.test(hud);
     })());
+    // Tyres, measured against the vehicle they belong to. Every wheel is tagged in
+    // the builder now, so this can ask the built scene instead of trusting the maths:
+    // is there a body over it, is its top high enough to meet that body, and is it
+    // standing on the ground rather than hovering over it or buried in it.
+    const wheelAudit = (() => {
+        const veh = cwx.boxes.filter(b => b.tag === 'vehicle');
+        let n = 0, bad = [];
+        scene.traverse(o => {
+            if (!o.userData || !o.userData.nkWheel) return;
+            n++;
+            const w = new THREE0.Box3().setFromObject(o);
+            const cx = (w.min.x + w.max.x) / 2, cz = (w.min.z + w.max.z) / 2;
+            // A vehicle is more than one collider — shell, cab, bed — and a tyre
+            // only has to reach the lowest of the ones hanging over it.
+            const over = veh.filter(b => cx > b.minX - 0.3 && cx < b.maxX + 0.3
+                && cz > b.minZ - 0.3 && cz < b.maxZ + 0.3);
+            if (!over.length) { bad.push(`no body at ${cx.toFixed(1)},${cz.toFixed(1)}`); return; }
+            const under = Math.min(...over.map(b => b.minY));
+            if (w.max.y < under - 0.07) bad.push(`top ${w.max.y.toFixed(2)} under body ${under.toFixed(2)}`);
+            if (Math.abs(w.min.y) > 0.09) bad.push(`bottom floats at ${w.min.y.toFixed(2)}`);
+        });
+        return { n, bad };
+    })();
+    ok('every tyre stands under a body, touches it, and stands on the ground',
+        wheelAudit.n >= 20 && wheelAudit.bad.length === 0,
+        `${wheelAudit.n} wheels measured, ${wheelAudit.bad.length} wrong${wheelAudit.bad.length ? ' — ' + wheelAudit.bad[0] : ''}`);
+    const board = (() => {
+        let n = 0, ok2 = true;
+        scene.traverse(o => {
+            if (!o.isMesh || !o.geometry) return;
+            bb.setFromObject(o); bb.getSize(sz);
+            if (Math.abs(sz.y / MAP_SCALE - 2.2) > 0.05) return;
+            if (Math.abs(Math.abs((bb.min.x + bb.max.x) / 2 / MAP_SCALE) - 17.8) > 0.35) return;
+            n++;
+            if (bb.min.y / MAP_SCALE > 0.02) ok2 = false;                        // off the deck
+            if (Math.abs((bb.min.z + bb.max.z) / 2 / MAP_SCALE + 8.75) > 0.6) ok2 = false;  // in the doorway
+        });
+        return { n, ok2 };
+    })();
+    ok('the propped sheet by the front wall stands on the ground and clear of the doorway',
+        board.n === 2 && board.ok2, `${board.n} sheets, grounded and out of the doorway: ${board.ok2}`);
+    const cab = (() => {
+        let n = 0, flush = true;
+        scene.traverse(o => {
+            if (!o.isMesh || !o.geometry) return;
+            bb.setFromObject(o); bb.getSize(sz);
+            if (Math.abs(sz.x / MAP_SCALE - 4.2) > 0.05 || Math.abs(sz.z / MAP_SCALE - 0.4) > 0.05) return;
+            n++;
+            if (Math.abs(bb.max.z / MAP_SCALE + 1.55) > 0.06) flush = false;      // 14 cm off the brick
+        });
+        return { n, flush };
+    })();
+    ok('the kitchen wall units and counters are back against the brick',
+        cab.n >= 2 && cab.flush, `${cab.n} runs, flush to the wall: ${cab.flush}`);
+    ok('the pyramids are gone, and nothing was left standing in the desert',
+        !/distantTerrain/.test(map) && (() => {
+            let far = 0;
+            scene.traverse(o => {
+                if (!o.isMesh || !o.geometry || o.geometry.type !== 'ConeGeometry') return;
+                const p = new THREE0.Vector3(); o.getWorldPosition(p);
+                if (Math.hypot(p.x, p.z) / MAP_SCALE > 115) far++;
+            });
+            return far === 0;
+        })());
     ok('the garage rack stands on two full-height end panels, one per side', countNear(0.6, 2.57, 0.1, [], 0) === 4,
         `${countNear(0.6, 2.57, 0.1, [], 0)} panels — two per garage, from the floor to the top board`);
     {

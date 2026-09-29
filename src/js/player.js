@@ -113,7 +113,6 @@ export class Player {
             if (e.code === 'Digit3') this.useSlot(2);
             if (e.code === 'Digit4') this.useSlot(3);
             if (e.code === 'KeyQ') this.cycleSlot(1);
-            if (e.code === 'KeyZ') this.ctx.useStreak('uav');
             if (e.code === 'KeyX') this.ctx.useStreak('air');
             if (e.code === 'KeyV') this.ctx.useStreak('nuke');
         });

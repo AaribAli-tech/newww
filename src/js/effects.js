@@ -87,6 +87,7 @@ export class Effects {
         this.puffs = this._pool(70, () => new THREE.Mesh(this.quad, this.smokeMat.clone()));
         this.flames = this._pool(40, () => new THREE.Mesh(this.quad, this.fireMat.clone()));
         this.bloods = this._pool(40, () => new THREE.Mesh(this.quad, this.bloodMat.clone()));
+        this.pools = [this.sparks, this.tracers, this.shells, this.puffs, this.flames, this.bloods];
         this.holes = [];
         this.holeIdx = 0;
         for (let i = 0; i < 90; i++) {
@@ -499,5 +500,19 @@ export class Effects {
 
     clearHoles() {
         for (const h of this.holes) h.visible = false;
+    }
+
+    /**
+     * Everything alive in the effect system, stopped. Particle life is advanced by
+     * the gameplay loop, so a burst that was mid-flight when you backed out to the
+     * menu never expired: the nuke's dust hung over the town forever, and it was
+     * still there on the way back in. Pools are released, the flash lights are
+     * zeroed, and the queue is emptied rather than aged out.
+     */
+    clearParticles() {
+        this.active.length = 0;
+        for (const pool of this.pools)
+            for (const slot of pool.arr) { slot.busy = false; slot.mesh.visible = false; }
+        for (const l of this.lights) { l.life = 0; l.peak = 0; l.light.intensity = 0; }
     }
 }

@@ -126,7 +126,7 @@ export class HUD {
             roundPips: $('roundPips'), pipsA: $('pipsA'), pipsB: $('pipsB'), livesTag: $('livesTag'),
             teamBars: $('teamBars'),
             ntBar: $('ntBar'), ntCount: $('ntCount'), ntTrack: $('nukeTrack'),
-            mini: $('miniCanvas'), miniMark: $('miniMark'), uavTag: $('uavTag'),
+            mini: $('miniCanvas'), miniMark: $('miniMark'),
             hpNum: $('hpNum'), hpFill: $('hpFill'),
             streakCol: $('streakCol'),
             medals: $('medals'),
@@ -442,9 +442,7 @@ export class HUD {
             }
         }
 
-        this.el.uavTag.style.display = s.uav ? 'block' : 'none';
-
-        this._minimap(player, bots, s.uav);
+        this._minimap(player, bots);
 
         // timers
         if (this.hmTimer > 0) {
@@ -534,7 +532,7 @@ export class HUD {
     }
 
     // ── minimap ─────────────────────────────────────────────────────────────
-    _minimap(player, bots, uav) {
+    _minimap(player, bots) {
         const c = this.mctx;
         if (!c) return;
         const half = MINI_HALF;
@@ -614,7 +612,7 @@ export class HUD {
         // ── entities (screen space so icons stay upright-ish) ──
         const now = performance.now();
         const edge = MAP_R - 8;
-        // A teamless mode has no friendlies to draw blue, and no UAV will ever
+        // A teamless mode has no friendlies to draw blue, and no spotter plane ever
         // light the lobby up — killstreaks are off there — so without this the
         // radar would show nothing but gunfire for the whole match.
         const solo = !!player.allHostile;
@@ -622,14 +620,14 @@ export class HUD {
             if (!b.alive) continue;
             const friendly = !solo && b.team === player.team;
             const flashed = now - (this.lastFireFlash.get(b) || -1e9) < 1800;
-            if (!friendly && !uav && !flashed && !solo) continue;
+            if (!friendly && !flashed && !solo) continue;
             const dx = (b.position.x - px) * MINI_SCALE, dz = (b.position.z - pz) * MINI_SCALE;
             const sx = half + dx * cs - dz * sn, sy = half + dx * sn + dz * cs;
             if (Math.hypot(sx - half, sy - half) > edge) continue;
             c.save();
             c.translate(sx, sy);
             c.rotate(b.yaw - player.yaw + Math.PI);
-            c.fillStyle = friendly ? '#4FA8FF' : (flashed && !uav ? 'rgba(255,77,77,0.75)' : '#FF4D4D');
+            c.fillStyle = friendly ? '#4FA8FF' : (flashed ? 'rgba(255,77,77,0.75)' : '#FF4D4D');
             c.beginPath();
             c.moveTo(0, -6); c.lineTo(4.6, 5); c.lineTo(0, 2.4); c.lineTo(-4.6, 5);
             c.closePath(); c.fill();

@@ -353,8 +353,13 @@ function buildHouse(kind) {
     deco(0.22, 0.14, 2.1, x0 - 0.12, 2.62, -5.8, mats.trim);
     deco(0.22, 2.5, 0.16, x0 - 0.12, 1.4, -6.8, mats.trim);
     deco(0.22, 2.5, 0.16, x0 - 0.12, 1.4, -4.8, mats.trim);
-    deco(0.08, 2.2, 1.7, 17.29, 1.35, -6.24, mats.wood, { rotY: -1.0 });
-    deco(0.09, 1.1, 0.9, 17.29, 1.55, -6.24, mats.trim, { rotY: -1.0, cast: false });
+    // A plywood sheet propped against the outside of the front wall. It used to
+    // stand yawed 57 degrees with its bottom 25 cm off the deck, half of it through
+    // the brick, in the doorway — which read as a television hovering over the
+    // porch. It is on the ground, flat against the wall face, and clear of the
+    // doorway now; a sheet you can walk through in a doorway is a bug.
+    deco(0.08, 2.2, 1.7, 17.80, 1.10, -8.75, mats.wood, { rotY: -0.06 });
+    deco(0.09, 1.1, 0.9, 17.755, 1.55, -8.75, mats.trim, { rotY: -0.06, cast: false });
     deco(0.16, 0.34, 0.16, x0 - 0.24, 2.15, -4.45, mats.dark, { cast: false });
     deco(0.2, 0.24, 0.2, x0 - 0.24, 1.92, -4.45, M.emissiveMat(0xffd79a, 0.9), { cast: false });
 
@@ -617,14 +622,17 @@ function furnishHouse(mats) {
 
     // ── kitchen / dining (south half) ──
     const counter = M.plain(0x8d8b84, 0.35, 0.1);
-    box(5.0, 0.9, 0.65, 21.5, F + 0.45, -2.05, mats.wood, { tag: 'prop' });
-    deco(5.2, 0.08, 0.72, 21.5, F + 0.94, -2.05, counter);
-    deco(4.2, 0.75, 0.4, 21.5, F + 1.95, -1.9, mats.wood);
-    deco(0.75, 0.1, 0.5, 20.6, F + 0.95, -2.05, metal, { cast: false });
-    deco(0.05, 0.3, 0.05, 20.6, F + 1.12, -1.86, metal, { cast: false });
-    box(0.85, 1.85, 0.75, 18.85, F + 0.93, -2.15, M.plain(0xd8d8d2, 0.28, 0.55), { tag: 'prop' });
-    box(0.75, 0.9, 0.65, 24.5, F + 0.45, -2.05, M.plain(0x2e3033, 0.35, 0.6), { tag: 'prop' });
-    deco(0.78, 0.05, 0.68, 24.5, F + 0.93, -2.05, dark, { cast: false });
+    // The whole run sits with its back on the brick. It used to stop 14-21 cm short
+    // of the wall, so every shelf and counter in this kitchen appeared to float
+    // forward off its own shadow line.
+    box(5.0, 0.9, 0.65, 21.5, F + 0.45, -1.89, mats.wood, { tag: 'prop' });
+    deco(5.2, 0.08, 0.72, 21.5, F + 0.94, -1.89, counter);
+    deco(4.2, 0.75, 0.4, 21.5, F + 1.95, -1.75, mats.wood);
+    deco(0.75, 0.1, 0.5, 20.6, F + 0.95, -1.89, metal, { cast: false });
+    deco(0.05, 0.3, 0.05, 20.6, F + 1.12, -1.70, metal, { cast: false });
+    box(0.85, 1.85, 0.75, 18.85, F + 0.93, -1.94, M.plain(0xd8d8d2, 0.28, 0.55), { tag: 'prop' });
+    box(0.75, 0.9, 0.65, 24.5, F + 0.45, -1.89, M.plain(0x2e3033, 0.35, 0.6), { tag: 'prop' });
+    deco(0.78, 0.05, 0.68, 24.5, F + 0.93, -1.89, dark, { cast: false });
     // Table pushed up against the divider: it has to leave a clear lane between
     // the living room and the kitchen, or the bots lose half the house.
     box(1.7, 0.1, 1.0, 22.0, F + 0.72, -4.2, mats.wood, { tag: 'prop' });
@@ -1025,6 +1033,7 @@ function wheel(x, y, z, radius, width, axis = 'z') {
             g.add(lug);
         }
     }
+    g.userData.nkWheel = true;             // so a rule can measure tyres vs bodies
     g.rotation.x = axis === 'z' ? Math.PI / 2 : 0;
     if (axis === 'x') g.rotation.z = Math.PI / 2;
     g.position.set(x * s, y, z);
@@ -1137,7 +1146,11 @@ function car(x, z, color, kind, axis = 'z') {
         alongD(2.0, 0.14, 0.2, 0, 0.55, 2.2, chrome);
     }
     for (const ow of [-1, 1]) for (const ol of [-1.45, 1.45]) {   // ol is ±1.45 authored, scaled below
-        if (axis === 'x') wheel(x + ow * treadW, 0.36, z + ol * (treadL / 1.45), 0.36, 0.24, 'z');
+        // The track (treadW) is always ACROSS the car and the wheelbase (treadL)
+        // always along it, which means they swap axes when the car turns 90 degrees.
+        // Both branches used to get the same treatment, which is how every
+        // quarter-turn car ended up with its tyres fore-and-aft of the wheels.
+        if (axis === 'x') wheel(x + ol * (treadL / 1.45), 0.36, z + ow * treadW, 0.36, 0.24, 'z');
         else wheel(x + ow * treadW, 0.36, z + ol * (treadL / 1.45), 0.36, 0.24, 'x');
     }
 }
@@ -1403,6 +1416,9 @@ function buildGround() {
     desert.rotation.x = -Math.PI / 2;
     desert.position.y = -0.06;
     desert.receiveShadow = true;
+    // Fixed at 900 m and exempt from the map scale: the sand beyond the wire is a
+    // backdrop, so growing the town must not grow the walk-to-nothing around it.
+    desert.userData.nkNoScale = true;
     CTX.scene.add(desert);
 
     pave(new THREE.PlaneGeometry(96, 90), M.dirt(), 0, 0.0, -2);
@@ -1503,53 +1519,6 @@ function buildSky(scene) {
     return { mesh, mat };
 }
 
-function distantTerrain(scene) {
-    // Two ranges at different distances, vertices jittered so the silhouette
-    // reads as eroded rock instead of a row of pyramids.
-    const near = M.plain(0x9c8568, 1.0, 0);
-    const far = M.plain(0x8d7f74, 1.0, 0);
-
-    const makeRidge = (count, radius, radVar, hMin, hMax, mat, jitter) => {
-        for (let i = 0; i < count; i++) {
-            const a = (i / count) * Math.PI * 2 + (Math.random() - 0.5) * 0.28;
-            const rad = radius + Math.random() * radVar;
-            const hh = hMin + Math.random() * (hMax - hMin);
-            const geo = new THREE.ConeGeometry(hh * (0.85 + Math.random() * 0.7), hh, 7, 3);
-            const pos = geo.attributes.position;
-            for (let v = 0; v < pos.count; v++) {
-                const y = pos.getY(v);
-                const k = 1 + (Math.random() - 0.5) * jitter * (0.35 + (0.5 - y / hh));
-                pos.setX(v, pos.getX(v) * k);
-                pos.setZ(v, pos.getZ(v) * k);
-                pos.setY(v, y + (Math.random() - 0.5) * hh * 0.06);
-            }
-            geo.computeVertexNormals();
-            const m = new THREE.Mesh(geo, mat);
-            m.position.set(Math.cos(a) * rad, hh / 2 - 8, Math.sin(a) * rad);
-            m.rotation.y = Math.random() * Math.PI;
-            m.scale.set(1, 0.62 + Math.random() * 0.55, 0.8 + Math.random() * 0.5);
-            scene.add(m);
-        }
-    };
-    makeRidge(22, 210, 70, 30, 62, near, 0.55);
-    makeRidge(16, 350, 130, 55, 105, far, 0.45);
-
-    for (const [mx, mz, mw, mh] of [[-250, 110, 78, 38], [210, -180, 96, 30], [40, 300, 120, 44]]) {
-        const geo = new THREE.CylinderGeometry(mw * 0.55, mw * 0.78, mh, 9, 2);
-        const pos = geo.attributes.position;
-        for (let v = 0; v < pos.count; v++) {
-            const k = 1 + (Math.random() - 0.5) * 0.16;
-            pos.setX(v, pos.getX(v) * k);
-            pos.setZ(v, pos.getZ(v) * k);
-        }
-        geo.computeVertexNormals();
-        const m = new THREE.Mesh(geo, far);
-        m.position.set(mx, mh / 2 - 8, mz);
-        m.rotation.y = Math.random();
-        scene.add(m);
-    }
-}
-
 // ============================================================================
 // PUBLIC ENTRY
 // ============================================================================
@@ -1588,9 +1557,8 @@ export function buildNuketown(scene, cw) {
 
     // world floor — authored half-width, scaled with everything else, and still
     // far bigger than the map so a soldier can never find its edge
-    cw.addAABB(-140, -1.0, -140, 140, 0.0, 140, 'ground');
+    cw.addAABB(-62, -1.0, -62, 62, 0.0, 62, 'ground');
 
-    distantTerrain(scene);
     const sky = buildSky(scene);
 
     // drifting dust motes
@@ -1648,7 +1616,14 @@ function applyWorldScale(scene, cw, k, skip) {
     if (!Number.isFinite(k) || k <= 0) return;
 
     for (const o of scene.children) {
-        if (o === skip || !(o.isMesh || o.isLine || o.isLineSegments || o.isPoints)) continue;
+        // Groups count. A wheel is a group (tyre, rim, hub, five lugs per side) and
+        // a group is a single object in the scene, so leaving groups out of this
+        // pass is how every tyre in town ended up a metre short of the car it
+        // belongs to: the body meshes were scaled out to their places and the
+        // wheels stayed at authored coordinates. Their children inherit the
+        // position and the scale, so nothing has to remember it twice.
+        if (o === skip || o.userData?.nkNoScale) continue;
+        if (!(o.isMesh || o.isLine || o.isLineSegments || o.isPoints || o.isGroup)) continue;
         o.position.multiplyScalar(k);
         if (k !== 1) o.scale.multiplyScalar(k);
     }
