@@ -494,8 +494,11 @@ rig.player.takeDamage(999, 'TESTER', { x: 1, z: 0 });       // the real death pa
 step(2);
 ok('dying drops every held control',
     rig.player.touch.fire === false && rig.player.touch.moveX === 0 && rig.player.touch.ads === false);
+ok('and the combat buttons leave the screen with it', el('touchUI').classList.contains('dead'));
 release('tFire', 13); stick.up();
 rig.player.alive = true;
+step(1);
+ok('and come back on the next spawn', !el('touchUI').classList.contains('dead'));
 rig.player.position.set(0, 0, 0);
 rig.player.velocity.set(0, 0, 0);
 
@@ -520,6 +523,51 @@ roamActive = false;
 step(1);
 ok('leaving roam clears the fly keys',
     roamKeys.get('KeyW') === false && roamKeys.get('Space') !== true);
+
+// ── 8b · the rectangle the phone is really showing ─────────────────────────
+group('the rectangle the device is really showing');
+{
+    const { viewportSize } = await import('../src/js/touch.js');
+    const win = (inner, vv, box) => ({
+        innerWidth: inner.w, innerHeight: inner.h,
+        visualViewport: vv && { width: vv.w, height: vv.h },
+        document: { documentElement: { clientWidth: box.w, clientHeight: box.h } }
+    });
+    const cut = viewportSize(win({ w: 844, h: 390 }, { w: 844, h: 346 }, { w: 844, h: 390 }));
+    ok('a toolbar over the bottom of the page is not part of the screen',
+        cut.w === 844 && cut.h === 346, `${cut.w}×${cut.h} of an 844×390 window`);
+    const plain = viewportSize(win({ w: 844, h: 390 }, null, { w: 844, h: 390 }));
+    ok('with no visual viewport it is the window', plain.w === 844 && plain.h === 390,
+        `${plain.w}×${plain.h}`);
+    const big = viewportSize(win({ w: 844, h: 390 }, { w: 900, h: 420 }, { w: 844, h: 390 }));
+    ok('a visual viewport larger than the page does not grow the canvas',
+        big.w === 844 && big.h === 390, `${big.w}×${big.h}`);
+
+    // The pads are a second layer: a menu must take both away.
+    showControls = false;
+    step(2);
+    ok('a menu hides the pads as well as the buttons',
+        !el('touchUI').classList.contains('on') && !el('touchPads').classList.contains('on'));
+    showControls = true;
+    step(2);
+    ok('and both come back together',
+        el('touchUI').classList.contains('on') && el('touchPads').classList.contains('on'));
+
+    // A drag nobody can use must not be spent the moment the player is back.
+    roamActive = false;
+    rig.player.alive = false;
+    look.down(600, 200);
+    for (let i = 1; i <= 5; i++) look.move(600 + i * 40, 200);
+    step(2);
+    const deadDX = rig.player.touch.lookDX;
+    look.up(800, 200);
+    rig.player.alive = true;
+    rig.player.yaw = 0;
+    step(1);
+    ok('a drag while dead is dropped, not spent on respawn',
+        deadDX === 0 && Math.abs(rig.player.yaw) < 0.001,
+        `lookDX ${deadDX}, yaw ${rig.player.yaw.toFixed(3)}`);
+}
 
 // ── 9 · a desktop is untouched ─────────────────────────────────────────────
 group('the desktop path');

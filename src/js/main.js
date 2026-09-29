@@ -21,7 +21,7 @@ import { characterAssets } from './character.js';
 import { vmAssets, vmAssetsReady } from './vmassets.js';
 import { upgradeTextures, photoStatus } from './materials.js';
 import { batchStaticScene, mergeStaticScene, mergeRig, pruneShadowCasters } from './optimize.js';
-import { IS_TOUCH, initTouch } from './touch.js';
+import { IS_TOUCH, initTouch, viewportSize, applyViewportVars } from './touch.js';
 import { WEAPON_DEFS } from './weapons.js';
 import { TEAM_A, TEAM_B, BOT_NAMES_A, BOT_NAMES_B, randElement, clamp, shuffle, MAP_SCALE } from './utils.js';
 import * as A from './audio.js';
@@ -53,6 +53,9 @@ const frameStats = { calls: 0, triangles: 0 };
 const DEVICE_DPR = window.devicePixelRatio || 1;
 let maxDpr = 1.15, curDpr = 1.0, frameAvg = 16, dprCooldown = 0;
 const DPR_FLOOR = 0.6;
+// The last size the renderer was actually built for, so a resize that changed
+// nothing (a phone fires more of those than a desktop ever does) costs nothing.
+let lastW = 0, lastH = 0, lastDpr = 0;
 let charShadowsEnabled = true;
 // The menu picker owns the choice; mirror it here so startMatch can read it.
 let selectedMode = pickedMode() || MODES[0].id;
@@ -380,7 +383,10 @@ function setupRenderer() {
         e.handled = true;
         throw e;
     }
-    renderer.setSize(window.innerWidth, window.innerHeight);
+    // The phone's real rectangle, not the layout viewport: see viewportSize().
+    const vs = IS_TOUCH ? viewportSize() : null;
+    if (vs) applyViewportVars(vs.h);
+    renderer.setSize(vs ? vs.w : window.innerWidth, vs ? vs.h : window.innerHeight);
     renderer.setPixelRatio(safeGfx ? 1.0 : curDpr);
     renderer.shadowMap.enabled = !safeGfx;
     renderer.shadowMap.type = THREE.PCFSoftShadowMap;
@@ -402,7 +408,8 @@ function setupRenderer() {
     const VIEW_FAR = 700;
     scene.fog = new THREE.Fog(0xcfc4ac, 110 * MAP_SCALE, Math.min(360 * MAP_SCALE, VIEW_FAR * 0.92));
 
-    camera = new THREE.PerspectiveCamera(78, window.innerWidth / window.innerHeight, 0.06, VIEW_FAR);
+    const startAspect = vs ? vs.w / vs.h : window.innerWidth / window.innerHeight;
+    camera = new THREE.PerspectiveCamera(78, startAspect, 0.06, VIEW_FAR);
     scene.add(camera);
 
     // A lost WebGL context is Chrome taking the canvas away — a driver reset, a
@@ -897,10 +904,36 @@ function bindUI() {
         'ArrowLeft', 'ArrowRight']);
 
     window.addEventListener('resize', onResize);
+    if (IS_TOUCH) {
+        // A phone changes shape without a resize: the URL bar slides away, the
+        // toolbar comes back, iOS reports the old size for a beat after a rotation,
+        // and going fullscreen swaps the whole rectangle for the locked one. None of
+        // those are a window resize on every browser, so listen to the things that
+        // actually move and re-measure on all of them.
+        const vv = window.visualViewport;
+        if (vv) { vv.addEventListener('resize', onResize); vv.addEventListener('scroll', onResize); }
+        window.addEventListener('orientationchange', () => {
+            onResize();
+            setTimeout(onResize, 250);       // iOS: the new size lands late
+            setTimeout(onResize, 700);
+        });
+        document.addEventListener('fullscreenchange', () => { onResize(); setTimeout(onResize, 250); });
+        document.addEventListener('visibilitychange', () => { if (!document.hidden) onResize(); });
+    }
 }
 
+/**
+ * Fit the drawing buffer and every full-screen layer to the rectangle the device
+ * is really showing. Cheap to call and safe to call often: the layers are sized by
+ * the CSS variable, and the expensive part — reallocating the post-processing
+ * targets — only happens when the numbers actually changed.
+ */
 function onResize() {
-    const w = window.innerWidth, h = window.innerHeight;
+    const vs = IS_TOUCH ? viewportSize() : null;
+    const w = vs ? vs.w : window.innerWidth, h = vs ? vs.h : window.innerHeight;
+    if (vs) applyViewportVars(h);
+    if (w === lastW && h === lastH && curDpr === lastDpr) return;
+    lastW = w; lastH = h; lastDpr = curDpr;
     camera.aspect = w / h;
     camera.updateProjectionMatrix();
     renderer.setPixelRatio(curDpr);
@@ -1392,6 +1425,17 @@ function loop(ts) {
         return;
     }
 
+    // The touch HUD mirrors state into player.touch before anything reads it, and
+    // hides itself the moment a menu is on screen. It runs before the paused and
+    // ended branches below rather than after them, because those two return: a
+    // phone that paused mid-match kept a full set of live-looking buttons over the
+    // pause card, and the fire button was still lit when the match ended. No-op on
+    // a desktop.
+    if (touchCtl) {
+        touchCtl.frame();
+        if (player) player.locked = !menuOpen();
+    }
+
     if (state === 'paused') { composerFX.composer.render(); return; }
 
     if (state === 'ended') {
@@ -1399,13 +1443,6 @@ function loop(ts) {
         composerFX.grade.uniforms.time.value = elapsed;
         composerFX.composer.render();
         return;
-    }
-
-    // The touch HUD mirrors state into player.touch before anything reads it, and
-    // hides itself the moment a menu is on screen. No-op on a desktop.
-    if (touchCtl) {
-        touchCtl.frame();
-        if (player) player.locked = !menuOpen();
     }
 
     // ── playing ──

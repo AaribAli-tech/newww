@@ -198,6 +198,23 @@ if (!process.argv.includes('--desktop')) {
                 const hit = document.elementFromPoint(r.x + r.width / 2, r.y + r.height / 2);
                 if (!hit || !(hit.id === id || el.contains(hit))) onTop.push(id + '→' + (hit ? hit.id || hit.className : 'none'));
             }
+            // The chips the player has to press: they live in the HUD, the pads are a
+            // layer below it, and a pad painted over a chip turns a tap into a drag.
+            const chips = ['btnHudPause', 'btnHudMute'];
+            for (const id of chips) {
+                const el = document.getElementById(id);
+                if (!el) continue;
+                const r = el.getBoundingClientRect();
+                if (r.width < 1) continue;
+                const hit = document.elementFromPoint(r.x + r.width / 2, r.y + r.height / 2);
+                if (!hit || !(hit.id === id || el.contains(hit))) onTop.push(id + '→' + (hit ? hit.id || hit.className : 'none'));
+            }
+            for (const el of document.querySelectorAll('#streakCol .stk')) {
+                const r = el.getBoundingClientRect();
+                if (r.width < 1) continue;
+                const hit = document.elementFromPoint(r.x + r.width / 2, r.y + r.height / 2);
+                if (!hit || !(hit === el || el.contains(hit))) onTop.push('stk→' + (hit ? hit.id || hit.className : 'none'));
+            }
             const ui = document.getElementById('touchUI');
             return {
                 on: ui.classList.contains('on'), bad, onTop, sizes,
@@ -208,7 +225,7 @@ if (!process.argv.includes('--desktop')) {
         });
         ok('the controls come up over the match', laid.on);
         ok('every control is on screen', laid.bad.length === 0, laid.bad.join(' '));
-        ok('and is the element under its own centre', laid.onTop.length === 0, laid.onTop.join(' '));
+        ok('and is the element under its own centre — chips included', laid.onTop.length === 0, laid.onTop.join(' '));
         ok('the trigger is thumb-sized', laid.sizes.tFire[0] >= 50 && laid.sizes.tFire[0] <= 90, JSON.stringify(laid.sizes.tFire));
         ok('the keyboard hints are hidden', laid.hints === 'none', laid.hints);
         ok('the controls are translucent', parseFloat(laid.fire || '0.5') <= 0.7, `--topaque ${laid.fire}`);

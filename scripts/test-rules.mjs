@@ -2031,11 +2031,27 @@ group('touch — the phone HUD and the desktop it must not disturb');
     // A selector is safe if it carries the touch class or a touch-only prefix, OR if
     // the element it names lives inside #touchUI — that container is display:none
     // until the touch layer turns it on, which is what keeps a desktop clear.
-    const uiOpen = html.indexOf('<div id="touchUI"');
-    const uiBody = html.slice(uiOpen, html.indexOf('\n</div>', uiOpen));
-    const touchIds = new Set([...uiBody.matchAll(/id="([A-Za-z0-9_]+)"/g)].map(m => m[1]));
-    ok('every touch widget lives inside the container that hides them',
-        touchIds.size >= 18, `${touchIds.size} widgets in #touchUI`);
+    // Two layers now: the buttons (visible, above the HUD) and the two invisible
+    // pads (below it, so a tap on a chip is a tap and not a camera drag). Both are
+    // display:none until touch.js turns them on, which is what keeps a desktop clear.
+    const layerBody = id => {
+        const open = html.indexOf(`<div id="${id}"`);
+        return open < 0 ? '' : html.slice(open, html.indexOf('\n</div>', open));
+    };
+    const idsIn = id => new Set([...layerBody(id).matchAll(/id="([A-Za-z0-9_]+)"/g)]
+        .map(m => m[1]).filter(x => x !== id));      // the layer's own id is not a widget
+    const btnIds = idsIn('touchUI'), padIds = idsIn('touchPads');
+    const touchIds = new Set([...btnIds, ...padIds]);
+    ok('every touch widget lives inside a container that hides it',
+        btnIds.size >= 16 && padIds.size === 2 && touchIds.size >= 18,
+        `${btnIds.size} widgets in #touchUI, ${padIds.size} pads in #touchPads`);
+    ok('the pads are a layer of their own, under the HUD, so a chip can be tapped',
+        /#touchPads\{position:fixed;inset:0;z-index:90;display:none;/.test(css)
+        && /#hud\{position:fixed;inset:0;z-index:100;/.test(css)
+        && html.indexOf('<div id="touchPads"') < html.indexOf('<div id="touchUI"')
+        && /const pads = \$\('touchPads'\)/.test(tjs)
+        && /pads\.classList\.toggle\('on', on\)/.test(tjs),
+        '#hud is a stacking context: a z-index on the chips could never win, the pads come down');
     const EXEMPT = new Set(['html', 'html,body', 'body', 'input', '#menu', '#panel', '#pause',
         '#end', '#diffGate', '#board', '#loader']);
     const loose = [];
@@ -2047,7 +2063,9 @@ group('touch — the phone HUD and the desktop it must not disturb');
         for (const sel of at[1].split(',')) {
             const s = sel.trim();
             if (!s || /^\d/.test(s)) continue;                    // keyframe step
-            if (/body\.touch|#touchUI|\.tbtn|#rotate/.test(s)) continue;
+            // `#touchPads`/`.tz` are the two pads: they only exist inside layers that
+            // are display:none until touch.js turns them on.
+            if (/body\.touch|#touchUI|#touchPads|\.tbtn|\.tz|#rotate/.test(s)) continue;
             // `#stick.on`, `#tSkip.hide` — the id is what has to be inside the layer.
             if (s.startsWith('#') && touchIds.has(s.slice(1).replace(/[.:][\s\S]*$/, ''))) continue;
             if (/^body:not\(\.touch\)/.test(s)) continue;      // the desktop guard
@@ -2069,12 +2087,31 @@ group('touch — the phone HUD and the desktop it must not disturb');
     ok('every control is vmin-sized with a floor and a ceiling', base && fire && mini && base.vmin > 0 && fire.vmin > 0 && mini.vmin > 0);
     ok('the left trigger is the smaller one', /#tFire2\{[\s\S]{0,200}?width:calc\(var\(--fire\) \*\.[1-9]\d?\)/.test(css)
         || /#tFire2\{[\s\S]{0,220}?width:calc\(var\(--fire\) \* \.\d+\)/.test(css));
-    ok('on a phone the readouts move to the top-right column, clear of the thumbs',
-        /body\.touch #brWrap\{top:calc\(\d+px \+ env\(safe-area-inset-top,0px\)\);[\s\S]{0,120}?bottom:auto/.test(css)
-        && /body\.touch #slots\{top:calc\(\d+px \+ env\(safe-area-inset-top,0px\)\);/.test(css)
-        && /body\.touch #streakCol\{top:calc\(\d+px \+ env\(safe-area-inset-top,0px\)\);[\s\S]{0,80}?bottom:auto/.test(css)
-        && /body\.touch #killfeed\{top:calc\(\d+px \+ env\(safe-area-inset-top,0px\)\);/.test(css),
-        'feed, ammo, weapons, streaks — one column, above the arc');
+    ok('on a phone the readouts are two bounded columns, clear of the thumbs',
+        /body\.touch #hudRight\{position:absolute;top:calc\(var\(--topRow\) \+ env\(safe-area-inset-top,0px\)\);[\s\S]{0,400}?bottom:calc\(var\(--row2\) \+ var\(--mini\) \+ var\(--gap\)\);[\s\S]{0,300}?display:flex;flex-direction:column[\s\S]{0,120}?overflow:hidden\}/.test(css)
+        && /body\.touch #hudLeft\{position:absolute;top:calc\(10px \+ env\(safe-area-inset-top,0px\)\);[\s\S]{0,420}?var\(--base\)[\s\S]{0,160}?display:flex;flex-direction:column[\s\S]{0,120}?overflow:hidden\}/.test(css)
+        && /body\.touch #nukeTrack, body\.touch #killfeed, body\.touch #brWrap, body\.touch #slots,\s*body\.touch #streakCol\{[\s\S]{0,200}?position:static/.test(css)
+        && /body\.touch #miniWrap, body\.touch #matchBar\{[\s\S]{0,120}?position:static/.test(css),
+        'pinned under the chips and above the left trigger, and clipped as a backstop');
+    ok('the top both columns start from is derived, not a number',
+        /--topRow:calc\(var\(--gap\) \+ var\(--mini\) \+ var\(--gap\)\)/.test(css),
+        'a bigger button pushes the readouts down instead of under the chips');
+    ok('and both wrappers are nothing at all on a desktop',
+        /#hudRight\{display:contents\}/.test(css) && /#hudLeft\{display:contents\}/.test(css));
+    ok('the minimap canvas is the size of its phone wrapper',
+        /body\.touch #miniCanvas\{width:100%;height:100%\}/.test(css),
+        'the 200 px canvas was drawn straight over the match block and the left trigger');
+    ok('the phone gets a phone-sized ammo counter',
+        /body\.touch #ammoCur\{font-size:34px\}/.test(css) && /body\.touch #ammoRes\{font-size:15px\}/.test(css),
+        '68 px was taller than the whole column it shares with the feed and the rewards');
+    ok('a short screen gives up the slot strip before it can reach the thumbs',
+        /@media \(max-height:460px\)\{\s*body\.touch #slots\{display:none\}/.test(css)
+        && /@media \(max-height:340px\)\{\s*body\.touch #killfeed\{display:none\}/.test(css));
+    ok('the nuke bar is a block of the right-hand column, not a fifth offset',
+        /<div id="hudRight">\s*<div id="nukeTrack">/.test(html)
+        && /body\.touch #nukeTrack\{width:min\(200px,34vw\);margin:0\}/.test(css)
+        && /body\.touch #nukeTrack, body\.touch #killfeed/.test(css),
+        'placed by the column, so it cannot be printed across the chips or the feed');
     const stickR = +(/const STICK_R = (\d+)/.exec(tjs) || [0, 0])[1];
     ok('the stick radius is half the drawn base, in both files',
         base && Math.abs(stickR * 2 - base.lo) <= 6, `STICK_R ${stickR} → ${stickR * 2}px vs a ${base && base.lo}px base`);
@@ -2141,9 +2178,10 @@ group('touch — the phone HUD and the desktop it must not disturb');
     ok('keyboard-only hints go quiet on a phone',
         /body\.touch #reloadHint, body\.touch #pauseHint, body\.touch #ntHint\{display:none\}/.test(css)
         && /body\.touch \.stk \.ky\{display:none\}/.test(css));
-    ok('the streak chips are above the look pad so a tap lands',
-        /body\.touch #streakCol\{z-index:130/.test(css) && /body\.touch #gameBtns\{[^}]*z-index:130/.test(css)
-        && /body\.touch \.stk\{[^}]*pointer-events:auto/.test(css));
+    ok('the widgets you have to press are still there to press',
+        /body\.touch \.stk\{[^}]*pointer-events:auto/.test(css)
+        && /#gameBtns\{position:absolute;top:14px;right:16px;display:flex;gap:6px;pointer-events:auto\}/.test(css),
+        'the pads moved under the HUD, so these no longer need a z-index to be reachable');
     ok('the menu is two columns on a short screen',
         /body\.touch #menu \.menuInner\{display:grid;grid-template-columns:minmax\(0,1fr\) auto/.test(css));
     ok('menus scroll instead of being cut off', /body\.touch \.card\{[^}]*overflow:auto/.test(css)
@@ -2166,6 +2204,38 @@ group('touch — the phone HUD and the desktop it must not disturb');
     ok('the touch object is a plain state bag, not an event system',
         /this\.touch = \{[\s\S]{0,240}?moveX: 0/.test(pjs));
     ok('vibration confirms a burst, not every shot', /if \(!buzzedThisBurst\)/.test(tjs) && (tjs.match(/buzz\(/g) || []).length <= 6);
+
+    // 9 · the rectangle the device is really showing, and the input that has to
+    // keep up with it. A phone in landscape is showing less than it reports.
+    ok('the size the phone shows is measured, not assumed',
+        /export function viewportSize\(win = window\)/.test(tjs) && /visualViewport/.test(tjs)
+        && /Math\.min\(win\.innerWidth/.test(tjs),
+        'the smaller of the layout and the visual viewport');
+    ok('and published, so every full-screen layer is the same rectangle',
+        /export function applyViewportVars\(h\)/.test(tjs) && /setProperty\('--vhpx'/.test(tjs)
+        && /height:var\(--vhpx,100vh\);bottom:auto/.test(css)
+        && /body\.touch #gameCanvas\{position:fixed;left:0;top:0\}/.test(css));
+    ok('a phone re-measures when the thing that moved says so',
+        /orientationchange[\s\S]{0,240}?fullscreenchange/.test(mjs)
+        && /visualViewport[\s\S]{0,200}?addEventListener\('resize', onResize\)/.test(mjs)
+        && /w === lastW && h === lastH/.test(mjs),
+        'rotation, fullscreen, the URL bar sliding, and back from the background');
+    ok('the page keeps its touch-action, so menus scroll and sliders drag',
+        /touch-action:manipulation;/.test(css) && /body\.touch #menu\{overflow-y:auto\}/.test(css)
+        && /body\.touch #gameCanvas, body\.touch #hud, body\.touch #touchUI, body\.touch #touchPads\{[\s\S]{0,120}?touch-action:none\}/.test(css),
+        'touch-action is intersected down from the ancestors: none on body killed every card');
+    ok('a drag or a jump saved up while you are dead is dropped, not spent on respawn',
+        /else if \(p && !p\.alive\) \{[\s\S]{0,400}?t\.lookDX = t\.lookDY = 0;/.test(tjs)
+        && /t\.jump = false;\s*\n\s*t\.lookDX = t\.lookDY = 0;/.test(tjs));
+    ok('and the combat buttons leave the screen while you are dead',
+        /#touchUI\.dead #tFire,#touchUI\.dead #tFire2,#touchUI\.dead #tAds,#touchUI\.dead #tReload,/.test(css)
+        && /root\.classList\.toggle\('dead', !!\(p && !p\.alive\)\)/.test(tjs),
+        'the death card gets the screen; the scoreboard and skip chips stay');
+    ok('the controls hide over the pause and end cards, not only over menus',
+        /if \(touchCtl\) \{\s*\n\s*touchCtl\.frame\(\);[\s\S]{0,160}?if \(state === 'paused'\)/.test(mjs),
+        'the loop used to return before the touch frame ever ran');
+    ok('the roam stick is translated into keys exactly once',
+        (tjs.match(/api\.roamMove\(\)/g) || []).length === 1);
 }
 
 console.log(`\n${fail === 0 ? '✓' : '✗'} ${pass} passed, ${fail} failed\n`);

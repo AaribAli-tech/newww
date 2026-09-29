@@ -37,7 +37,13 @@ const DEVICES = [
     { name: '360×640 phone', w: 640, h: 360 },
     { name: '390×844 phone', w: 844, h: 390 },
     { name: '412×915 phone', w: 915, h: 412 },
-    { name: '768×1024 tablet', w: 1024, h: 768 }
+    { name: '768×1024 tablet', w: 1024, h: 768 },
+    // Not in the brief, but a phone can be one: the shortest landscape there is
+    // (568×320, the SE-era screen) with a home bar's inset under it. This is the
+    // shape where the readout column used to run into the thumb grid, and where a
+    // bottom-anchored button grid and a top-anchored column disagree about who
+    // owns the corner — so it is in the suite now, not only in a one-off probe.
+    { name: '568×320 short', w: 568, h: 320 }
 ];
 // A landscape notch lives on the *side* of the screen and the home bar at the
 // bottom, so the sides and the bottom are what a phone actually loses.
@@ -176,13 +182,18 @@ const FIXED = [...BTN, 'tBoard', 'tSkip', 'tFull'];          // laid out in CSS
 const ROAM = ['tUp', 'tDown', 'tNext'];                       // only up in free roam
 const CL = Object.fromEntries(WIDGETS.map(id => [id,
     id === 'stickZone' || id === 'lookZone' ? ['.tz'] : (BTN.concat(['tBoard', 'tSkip', 'tFull', 'tUp', 'tDown', 'tNext']).includes(id) ? ['.tbtn'] : [])]));
-const HUD = ['miniWrap', 'matchBar', 'killfeed', 'healthWrap', 'brWrap', 'slots', 'streakCol'];
+// The right-hand readouts are modelled as one column below; these three are the
+// left-hand corners, placed by their own rules and measured where they land.
 
 let worstGap = Infinity, worstPair = '', maxCover = 0, minSize = Infinity, highest = 0;
 const seen = {};
 for (const dev of DEVICES) {
     group(`${dev.name} (${dev.w}×${dev.h} landscape)`);
-    for (const [notchName, at] of [['', FLAT], ['notched', NOTCH]]) {
+    for (const [notchName, baseAt] of [['', FLAT], ['notched', NOTCH]]) {
+        // A home bar comes with a notch, and every notched phone is at least 375 px
+        // tall in landscape; a 320-px screen has a side inset or none. Modelling the
+        // two together would test a device that does not exist.
+        const at = notchName && dev.h <= 340 ? { l: 47, r: 47, t: 0, b: 0 } : baseAt;
         const C = collect(dev.w, dev.h);
         const R = {};
         for (const id of WIDGETS) R[id] = rectOf(C, id, dev.w, dev.h, at, CL[id]);
@@ -217,8 +228,10 @@ for (const dev of DEVICES) {
         if (Number.isFinite(gap)) { worstGap = Math.min(worstGap, gap); if (gap === worstGap) worstPair = `${pair} @ ${tag}`; }
 
         // The view itself: a box in the middle of the screen that no widget may enter.
-        // The box an enemy appears in: the crosshair, plus a third of the screen.
-        const centre = { x: dev.w * 0.33, y: dev.h * 0.33, w: dev.w * 0.34, h: dev.h * 0.34 };
+        // Measured inside the safe area — behind a notch and under a home bar there is
+        // no picture at all, so a button reaching in there is not covering the view.
+        const useW = Math.max(1, dev.w - at.l - at.r), useH = Math.max(1, dev.h - at.t - at.b);
+        const centre = { x: at.l + useW * 0.33, y: at.t + useH * 0.33, w: useW * 0.34, h: useH * 0.34 };
         let covered = 0;
         for (const id of WIDGETS) {
             // The two pads are invisible; the stick appears under the thumb and is
@@ -237,33 +250,115 @@ for (const dev of DEVICES) {
             seen[dev.name] = R;
         }
 
-        // HUD readouts, and the thumb clearance they have to respect
-        const NOM = { brWrap: [150, 28], slots: [112, 22], killfeed: [180, 46], healthWrap: [120, 54],
-            streakCol: [140, 28], matchBar: [118, 26], miniWrap: [118, 118] };
+        // ── the right-hand readout column ──
+        // Everything on that edge — the nuke bar, the feed, the ammo block, the slot
+        // strip, the reward tiles — is one flex column on a phone (#hudRight). This is
+        // not a browser, so each block's height is the one its own CSS implies: the
+        // bar's label (its key hint is hidden on touch), the feed's lines, the 34 px
+        // counter and the strip under it, a slot chip, a 44×28 tile. The column is
+        // then laid out from those, top edge first, and the three things that four
+        // hand-placed offsets could not know are checked: the blocks stack, they fit
+        // the box they are given, and the box stops above the thumbs.
+        // A custom property is not a declaration on an element, so it is resolved
+        // from the variable table rather than through the cascade.
+        const cssVar = (name, axis) => {
+            const raw = C.vars.get(name);
+            return raw ? C.num(raw, axis, at) : NaN;
+        };
+        const gridGap = cssVar('--gap', 'v');
+        const mini = cssVar('--mini', 'v');
+        const boxTop = C.get('body.touch #hudRight', 'top', 'v', at);
+        const boxBottom = C.get('body.touch #hudRight', 'bottom', 'v', at);
+        const boxRight = C.get('body.touch #hudRight', 'right', 'h', at);
+        const feedLines = dev.h <= 340 ? 0 : dev.h <= 420 ? 2 : 3;
+        const BLOCKS = [
+            ['nukeTrack', C.get('body.touch #nukeTrack', 'width', 'h', at) || 200, 20],
+            ['killfeed', C.get('body.touch #killfeed', 'width', 'h', at) || 180,
+                feedLines ? feedLines * 15 + 2 : 0],
+            ['brWrap', 116, 52],                        // 34 px counter, weapon row, strip
+            ['slots', 113, dev.h <= 460 ? 0 : 22],      // given up on a short screen
+            ['streakCol', 140, 28]                      // three 44×28 tiles and their gaps
+        ];
+        const colW = Math.max(...BLOCKS.filter(b => b[2] > 0).map(b => b[1]));
+        const boxH = dev.h - boxBottom - boxTop;
+        const box = { x: dev.w - boxRight - colW, y: boxTop, w: colW, h: boxH };
         const hr = {};
-        for (const id of HUD) hr[id] = rectOf(C, id, dev.w, dev.h, at, [], NOM[id]);
-        hr.gameBtns = rectOf(C, 'gameBtns', dev.w, dev.h, at, [], [42, 42]);
-        const missingHud = HUD.filter(id => !hr[id]);
-        ok(`${tag}: the HUD corners are laid out too`, missingHud.length === 0, missingHud.join(' '));
-        // the top-right column, and the thumb cluster under it, must not stack on
-        // each other: one shared right edge, five elements.
-        const col = ['gameBtns', 'killfeed', 'brWrap', 'slots', 'streakCol'].filter(k => hr[k]);
-        const stack = [];
-        for (let i = 0; i < col.length; i++)
-            for (let j = i + 1; j < col.length; j++)
-                if (hit(hr[col[i]], hr[col[j]], -4)) stack.push(`${col[i]}/${col[j]}`);
-        ok(`${tag}: the top-right readout column does not overlap itself`, stack.length === 0, stack.join(' '));
+        let colEnd = boxTop;
+        for (const [id, w, h] of BLOCKS) {
+            if (h <= 0) continue;
+            hr[id] = { x: box.x + colW - w, y: colEnd, w, h };
+            colEnd += h + 4;                            // the wrapper's 4 px gap
+        }
+        // The mute and pause chips: 38 px on a phone (`body.touch .gbtn`), in from the
+        // safe area by the same 16 px the column uses.
+        hr.gameBtns = { x: dev.w - at.r - 16 - 82, y: gridGap + at.t, w: 82, h: 38 };
+        const MISSING = dev.h <= 340 ? ['killfeed', 'slots'] : dev.h <= 460 ? ['slots'] : [];
+        ok(`${tag}: the readout column is laid out`,
+            Number.isFinite(boxTop) && Number.isFinite(boxBottom) && Number.isFinite(gridGap)
+            && !!hr.nukeTrack && !!hr.brWrap && !!hr.streakCol && MISSING.every(id => !hr[id]),
+            `box ${Math.round(boxTop)}..${Math.round(boxTop + boxH)}`);
+        const stacked = [];
+        let prev = null;
+        for (const id of ['nukeTrack', 'killfeed', 'brWrap', 'slots', 'streakCol']) {
+            if (!hr[id]) continue;
+            if (prev && hr[id].y < prev.y + prev.h - 0.5) stacked.push(`${id} over ${prev.id}`);
+            prev = { id, ...hr[id] };
+        }
+        ok(`${tag}: the readouts stack instead of being printed over each other`,
+            stacked.length === 0, stacked.join(' '));
+        ok(`${tag}: the readouts fit above the thumb grid`,
+            colEnd - 4 <= boxTop + boxH + 0.5,
+            `${Math.round(colEnd - 4)} px of readouts in a ${Math.round(boxTop + boxH - boxTop)} px box`
+            + ` (${Math.round(boxTop)}..${Math.round(boxTop + boxH)})`);
+        ok(`${tag}: the mute and pause chips are above the column`,
+            hr.gameBtns.y + hr.gameBtns.h <= boxTop + 0.5,
+            `chips end ${Math.round(hr.gameBtns.y + hr.gameBtns.h)} vs the column at ${Math.round(boxTop)}`);
         const over = [];
-        for (const id of FIXED) {
+        for (const id of FIXED.concat(ROAM)) {
             if (!R[id]) continue;
-            for (const k of col) if (hit(R[id], hr[k], -4)) over.push(`${id}/${k}`);
+            for (const k of Object.keys(hr)) if (hit(R[id], hr[k], -4)) over.push(`${id}/${k}`);
         }
         ok(`${tag}: no readout sits under a thumb button`, over.length === 0, over.join(' '));
-        if (R.tFire && hr.brWrap) {
-            const okBr = hr.brWrap.y + hr.brWrap.h <= R.tJump.y + 4;
-            ok(`${tag}: the readouts stop above the button grid`, okBr,
-                `column ends ${hr.brWrap.y.toFixed(0)} vs the jump row at ${R.tJump.y.toFixed(0)}`);
+        // ── the left-hand column ──
+        // The minimap and the match block, in the same shape as the right-hand one and
+        // bounded by the trigger above the left thumb. The blocks are the sizes their
+        // own rules give them: the minimap's three steps, and a match block of two
+        // scores on one line, the round row (which changes) and the clock.
+        const leftTop = C.get('body.touch #hudLeft', 'top', 'v', at);
+        const leftH = C.get('body.touch #hudLeft', 'height', 'v', at);
+        const leftLeft = C.get('body.touch #hudLeft', 'left', 'h', at);
+        // The steps the stylesheet takes them through, short screen first.
+        const mmSize = dev.h <= 340 ? 84 : dev.h <= 460 ? 96 : dev.h <= 560 ? 118 : 200;
+        const scSize = dev.h <= 340 ? 14 : dev.h <= 460 ? 16 : dev.h <= 560 ? 18 : 23;
+        const clockSize = dev.h <= 340 ? 14 : dev.h <= 560 ? 16 : 25;
+        const LB = [
+            ['miniWrap', mmSize],
+            ['matchBar', scSize + 4 + (dev.h <= 340 ? 0 : 12) + 4 + clockSize]
+        ];
+        const lbox = { x: leftLeft, y: leftTop, w: mmSize, h: leftH };
+        const lGap = C.get('body.touch #hudLeft', 'gap', 'v', at) || gridGap;
+        const lr = {};
+        let lEnd = leftTop;
+        for (const [id, h] of LB) { lr[id] = { x: lbox.x, y: lEnd, w: mmSize, h }; lEnd += h + lGap; }
+        ok(`${tag}: the left-hand column is laid out`,
+            Number.isFinite(leftTop) && Number.isFinite(leftH) && Number.isFinite(leftLeft)
+            && lEnd - lGap <= leftTop + leftH + 0.5,
+            `minimap + match block end at ${Math.round(lEnd - lGap)},`
+            + ` the box at ${Math.round(leftTop + leftH)} (a ${Math.round(mmSize)} px map)`);
+        const lowerLeft = [];
+        for (const id of FIXED) {
+            if (!R[id]) continue;
+            for (const k of Object.keys(lr)) if (hit(R[id], lr[k], -4)) lowerLeft.push(`${id}/${k}`);
         }
+        ok(`${tag}: the left-hand readouts keep clear of the thumb buttons`,
+            lowerLeft.length === 0, lowerLeft.join(' '));
+        // The health readout is the one HUD block that is not in either column: it
+        // keeps the bottom-left corner, above the stick's resting place and below the
+        // trigger.
+        const hp = rectOf(C, 'healthWrap', dev.w, dev.h, at, [], [104, 30]);
+        ok(`${tag}: the health readout stays clear of the thumb buttons`,
+            !!hp && FIXED.every(id => !R[id] || !hit(R[id], hp, -4)) && hp.y + hp.h <= dev.h,
+            hp ? `hp ${Math.round(hp.y)}..${Math.round(hp.y + hp.h)} of ${dev.h}` : 'no rect');
     }
 }
 

@@ -39,6 +39,39 @@ export const IS_TOUCH = (() => {
 const $ = id => document.getElementById(id);
 const clamp = (v, a, b) => (v < a ? a : v > b ? b : v);
 
+/**
+ * The rectangle the device is actually showing, in CSS pixels.
+ *
+ * `window.innerWidth`/`innerHeight` are the *layout* viewport, which on a phone in
+ * landscape is the whole screen: a toolbar and a home bar lie over the bottom of
+ * it, so a full-screen layout anchored with `inset:0` puts its bottom row — the
+ * fire button, the health readout — behind the browser's own chrome. The visual
+ * viewport is the part the player can see, so the smaller of the two is the
+ * rectangle every full-screen layer is sized to. Rounded, because a fractional
+ * size reallocates the drawing buffer for nothing.
+ */
+export function viewportSize(win = window) {
+    const vv = win.visualViewport;
+    const el = win.document && win.document.documentElement;
+    const cap = (v, ceiling) => Math.max(1, Math.round(Math.min(v || ceiling, ceiling)));
+    const w = cap(Math.min(win.innerWidth || 0, (vv && vv.width) || Infinity),
+        (el && Math.round(el.clientWidth)) || Infinity);
+    const h = cap(Math.min(win.innerHeight || 0, (vv && vv.height) || Infinity),
+        (el && Math.round(el.clientHeight)) || Infinity);
+    return { w, h };
+}
+
+/**
+ * Publish that height to CSS. The canvas, the HUD, the pads and the buttons are
+ * all `height:var(--vhpx,100vh)`, so one measurement keeps four layers the same
+ * rectangle — a HUD longer than the 3D view is a HUD whose bottom row is off the
+ * screen. Called from main.js's resize path, which is where the measurement lives.
+ */
+export function applyViewportVars(h) {
+    try { document.documentElement.style.setProperty('--vhpx', `${Math.round(h)}px`); }
+    catch { /* no DOM (node tests) */ }
+}
+
 // Stick geometry, in CSS pixels of the base radius; the CSS sizes the base and
 // reads these back, so changing the look is a one-line change in index.html.
 const STICK_R = 45;           // half the base, i.e. the full-throw radius. Kept at
@@ -53,6 +86,12 @@ export function initTouch(hooks) {
     const root = $('touchUI');
     if (!root) return null;
     document.body.classList.add('touch');
+    // The two invisible pads live in their own layer, below the HUD: the pause chip
+    // and the killstreak tiles are inside #hud, which is a stacking context at
+    // z-index 100, so a z-index on the chips themselves can never beat a sibling
+    // layer. The pads come down instead — a pad is invisible, so nothing is lost,
+    // and every tap meant for a chip is now a tap and not a camera drag.
+    const pads = $('touchPads');
 
     const player = () => hooks.getPlayer();
     // `settings` is handed over as a getter because main.js swaps the whole object
@@ -271,7 +310,11 @@ export function initTouch(hooks) {
         if (!document.fullscreenElement) {
             const req = el.requestFullscreen && el.requestFullscreen({ navigationUI: 'hide' });
             if (req && req.catch) req.catch(() => { /* refused: stay windowed */ });
-        } else if (document.exitFullscreen) document.exitFullscreen().catch(() => {});
+        } else if (document.exitFullscreen) {
+            // Safari on the Mac returns undefined here, not a promise.
+            const out = document.exitFullscreen();
+            if (out && out.catch) out.catch(() => {});
+        }
         // The orientation lock is only honoured inside fullscreen, and only on
         // Android; where it is refused, the rotate overlay explains the rest.
         setTimeout(() => {
@@ -299,10 +342,10 @@ export function initTouch(hooks) {
     for (const type of ['gesturestart', 'gesturechange', 'dblclick'])
         root.addEventListener(type, e => e.preventDefault());
     document.addEventListener('touchmove', e => {
-        if (e.target && e.target.closest && e.target.closest('#touchUI')) e.preventDefault();
+        if (e.target && e.target.closest && e.target.closest('#touchUI, #touchPads')) e.preventDefault();
     }, { passive: false });
     // Never let a tap on the play area become a text-selection or a callout.
-    root.addEventListener('contextmenu', e => e.preventDefault());
+    for (const el of [root, pads]) if (el) el.addEventListener('contextmenu', e => e.preventDefault());
 
     // ── per-frame glue ──────────────────────────────────────────────────────
     const sizeVar = v => root.style.setProperty('--tsize', String(v));
@@ -319,8 +362,16 @@ export function initTouch(hooks) {
             if (on !== api.visible) {
                 api.visible = on;
                 root.classList.toggle('on', on);
-                if (!on) { stickEnd(); t.fire = false; t.ads = false; t.sprintBtn = false;
-                    if (adsBtn) adsBtn.classList.remove('lit'); }
+                if (pads) pads.classList.toggle('on', on);
+                if (!on) {
+                    stickEnd();
+                    t.fire = t.ads = t.sprintBtn = false;
+                    // A drag or a jump saved up behind a menu is a camera snap and a
+                    // hop you never asked for the moment it closes.
+                    t.jump = false;
+                    t.lookDX = t.lookDY = 0;
+                    if (adsBtn) adsBtn.classList.remove('lit');
+                }
             }
             if (!on) return;
             // Clamped here as well as by the input, because settings.js is a
@@ -331,34 +382,29 @@ export function initTouch(hooks) {
             const roamOn = !!(hooks.roaming && hooks.roaming());
             root.classList.toggle('roam', roamOn);
             if (roamOn) {
-                if (hooks.roam) {
-                    // The free-roam camera moves on WASD, so the stick is translated
-                    // into the same keys rather than into a second movement path.
-                    const m = Math.hypot(t.moveX, t.moveY);
-                    if (m < DEAD) {
-                        for (const k of ['KeyW', 'KeyA', 'KeyS', 'KeyD']) hooks.roam.key(k, false);
-                    } else {
-                        const a = Math.atan2(t.moveX, -t.moveY);
-                        hooks.roam.key('KeyW', Math.abs(a) < 1.15);
-                        hooks.roam.key('KeyS', Math.abs(a) > 2.0);
-                        hooks.roam.key('KeyD', a > 1.15 && a < 2.0);
-                        hooks.roam.key('KeyA', a < -1.15 && a > -2.0);
-                    }
-                    hooks.roam.key('ShiftLeft', t.sprint);
-                    if (t.lookDX || t.lookDY) hooks.roam.look(t.lookDX, t.lookDY, 1);
-                }
-                t.lookDX = t.lookDY = 0;
-            }
-            if (roamOn) {
-                // The roam camera is key-driven, so the stick becomes keys here.
+                // The free-roam camera moves on WASD, so the stick is translated into
+                // the same keys rather than into a second movement path, and the drag
+                // goes straight to the camera: the player is not alive to spend it.
                 api.roamMove();
-                if (hooks.roam && (t.lookDX || t.lookDY)) {
-                    hooks.roam.look(t.lookDX, t.lookDY, 1);
-                    t.lookDX = t.lookDY = 0;      // the player is not alive to spend them
+                if (t.lookDX || t.lookDY) {
+                    if (hooks.roam) hooks.roam.look(t.lookDX, t.lookDY, 1);
+                    t.lookDX = t.lookDY = 0;
                 }
+            } else if (p && !p.alive) {
+                // Dead in a mode that respawns you: nobody reads a drag or a jump
+                // while the death card is up, and player.js spends whatever has piled
+                // up in the single frame you come back in. Six seconds of thumb work
+                // landed as one snap of the view — so it is dropped here instead.
+                t.lookDX = t.lookDY = 0;
+                t.jump = false;
             }
             // State the buttons mirror, so they read correctly without a press:
             // crouch is a toggle and ADS can be flipped from the keyboard too.
+            // Dead: there is nothing to shoot and nothing to jump on, so the combat
+            // cluster goes with the rest of the controls. The pads stay (free roam is
+            // looked around with a thumb), and so do the scoreboard, skip and
+            // fullscreen chips, which are exactly what the death screen wants.
+            root.classList.toggle('dead', !!(p && !p.alive));
             if (p) {
                 $('tCrouch') && $('tCrouch').classList.toggle('lit', !!p.isCrouching);
                 adsBtn && adsBtn.classList.toggle('lit', !!t.ads);
@@ -393,7 +439,7 @@ export function initTouch(hooks) {
             }
             set('ShiftLeft', t.sprint);
         },
-        destroy() { root.classList.remove('on'); }
+        destroy() { root.classList.remove('on'); if (pads) pads.classList.remove('on'); }
     };
     return api;
 }

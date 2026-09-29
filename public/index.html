@@ -6,8 +6,8 @@
       user-scalable=no, viewport-fit=cover">
 <title>NUKETOWN</title>
 
-<link rel="stylesheet" href="/css/styles.4394d11c7d.css">
-<link rel="preload" as="script" crossorigin href="/js/game.fc05941de5.js">
+<link rel="stylesheet" href="/css/styles.df44577e61.css">
+<link rel="preload" as="script" crossorigin href="/js/game.049baf05a4.js">
 <link rel="preload" as="font" type="font/woff2" crossorigin href="/fonts/rajdhani-400.759a9000e4.woff2">
 <link rel="preload" as="font" type="font/woff2" crossorigin href="/fonts/teko-700.a57552efb2.woff2">
 <link rel="icon" href="/favicon.svg" type="image/svg+xml">
@@ -151,34 +151,66 @@
   </div>
   <div id="hitmarker"><i></i><i></i><i></i><i></i></div>
 
-  <div id="miniWrap">
-    <canvas id="miniCanvas" width="400" height="400"></canvas>
-    <div id="miniMark"></div>
+  <!-- The left-hand readout column. display:contents on a desktop, so the minimap
+       and the match block keep the corners they always had; one flex box on a phone,
+       for the same reason #hudRight is (see below) — and because the left thumb has
+       a trigger resting above it that a taller-looking column can reach. -->
+  <div id="hudLeft">
+    <div id="miniWrap">
+      <canvas id="miniCanvas" width="400" height="400"></canvas>
+      <div id="miniMark"></div>
+    </div>
+    <div id="matchBar">
+      <div id="teamBars">
+        <div class="tb a"><span class="sc" id="scoreA">0</span><i class="bar"><b id="barA"></b></i></div>
+        <div class="tb b"><span class="sc" id="scoreB">0</span><i class="bar"><b id="barB"></b></i></div>
+      </div>
+      <div id="roundPips"><span id="pipsA"></span><em id="livesTag"></em><span id="pipsB"></span></div>
+      <div id="matchFoot">
+        <span id="timer">10:00</span>
+        <span id="modeLine">Team Deathmatch</span>
+      </div>
+      <div id="modeState"><b id="modePrimary"></b><span id="modeSecondary"></span></div>
+    </div>
   </div>
 
-  <div id="matchBar">
-    <div id="teamBars">
-      <div class="tb a"><span class="sc" id="scoreA">0</span><i class="bar"><b id="barA"></b></i></div>
-      <div class="tb b"><span class="sc" id="scoreB">0</span><i class="bar"><b id="barB"></b></i></div>
+
+  <!-- The right-hand readout column. On a desktop this is nothing at all —
+       display:contents, so each of the four keeps the corner it always had. On a
+       phone it is one flex box, because four absolutely-placed blocks that each
+       know only their own offset from the top is how the ammo counter ended up
+       printed across the slot strip and the killstreak tiles. -->
+  <div id="hudRight">
+    <div id="nukeTrack">
+      <div id="ntHead">
+        <span id="ntLabel">Tactical Nuke</span>
+        <span id="ntCount"><b>0</b> / 15 KILLS</span>
+      </div>
+      <div id="ntBar"></div>
+      <div id="ntHint">Press V to deploy</div>
     </div>
-    <div id="roundPips"><span id="pipsA"></span><em id="livesTag"></em><span id="pipsB"></span></div>
-    <div id="matchFoot">
-      <span id="timer">10:00</span>
-      <span id="modeLine">Team Deathmatch</span>
+    <div id="killfeed"></div>
+
+    <div id="brWrap">
+      <div id="equip">
+        <div class="eq" id="eqLethal"><span class="ic">✸</span><span class="lb">Frag</span><span class="ct">1</span></div>
+        <div class="eq" id="eqTactical"><span class="ic">◎</span><span class="lb">Stun</span><span class="ct">2</span></div>
+      </div>
+      <div id="ammoWrap">
+        <div id="wpnRow"><span id="wpnIcon"></span><span id="wpnName">M4A1 Carbine</span></div>
+        <div id="ammoLine"><span id="ammoCur">30</span><span id="ammoRes">180</span></div>
+        <div id="fireStrip"><i></i><i></i><i></i><span id="fireMode">AUTO</span></div>
+        <div id="reloadHint">Press R to reload</div>
+      </div>
     </div>
-    <div id="modeState"><b id="modePrimary"></b><span id="modeSecondary"></span></div>
+
+    <div id="slots">
+      <div class="slot on">1</div><div class="slot">2</div><div class="slot">3</div><div class="slot">4</div>
+    </div>
+
+    <div id="streakCol"></div>
   </div>
 
-  <div id="nukeTrack">
-    <div id="ntHead">
-      <span id="ntLabel">Tactical Nuke</span>
-      <span id="ntCount"><b>0</b> / 15 KILLS</span>
-    </div>
-    <div id="ntBar"></div>
-    <div id="ntHint">Press V to deploy</div>
-  </div>
-
-  <div id="killfeed"></div>
   <div id="eventFeed"></div>
 
   <!-- kill confirmation stack, centred above the crosshair -->
@@ -191,25 +223,6 @@
   <div id="healthWrap">
     <div id="hpNum">100<small>HP</small></div>
     <div id="hpBar"><div id="hpFill"></div></div>
-  </div>
-
-  <div id="streakCol"></div>
-
-  <div id="slots">
-    <div class="slot on">1</div><div class="slot">2</div><div class="slot">3</div><div class="slot">4</div>
-  </div>
-
-  <div id="brWrap">
-    <div id="equip">
-      <div class="eq" id="eqLethal"><span class="ic">✸</span><span class="lb">Frag</span><span class="ct">1</span></div>
-      <div class="eq" id="eqTactical"><span class="ic">◎</span><span class="lb">Stun</span><span class="ct">2</span></div>
-    </div>
-    <div id="ammoWrap">
-      <div id="wpnRow"><span id="wpnIcon"></span><span id="wpnName">M4A1 Carbine</span></div>
-      <div id="ammoLine"><span id="ammoCur">30</span><span id="ammoRes">180</span></div>
-      <div id="fireStrip"><i></i><i></i><i></i><span id="fireMode">AUTO</span></div>
-      <div id="reloadHint">Press R to reload</div>
-    </div>
   </div>
 
   <div id="gameBtns">
@@ -231,9 +244,17 @@
 <!-- ════════ TOUCH HUD (shown only on touch devices; see touch.js) ════════
      The zones are invisible; the stick is drawn wherever the left thumb lands.
      Sizes and positions all live in the #touchUI block of the stylesheet. -->
-<div id="touchUI" aria-hidden="true">
+<!-- The two invisible pads are their own layer, and deliberately the lowest one.
+     Everything the player has to PRESS lives in #hud, and #hud is a stacking
+     context at z-index 100 — a child of it can never rise above a sibling layer
+     however big its own z-index is, so the pads come down under it instead of the
+     chips going up. The visible buttons stay in #touchUI, on top of everything, so
+     a scope mask or a damage vignette cannot dim the thing you are pressing. -->
+<div id="touchPads" aria-hidden="true">
   <div id="stickZone" class="tz"></div>
   <div id="lookZone" class="tz"></div>
+</div>
+<div id="touchUI" aria-hidden="true">
   <div id="stick"><i id="stickKnob"></i></div>
   <button class="tbtn" id="tFire" type="button"><span>&#9679;</span>FIRE</button>
   <button class="tbtn" id="tFire2" type="button"><span>&#9679;</span></button>
@@ -318,6 +339,6 @@
   </div>
 </div>
 
-<script type="module" src="/js/game.fc05941de5.js"></script>
+<script type="module" src="/js/game.049baf05a4.js"></script>
 </body>
 </html>

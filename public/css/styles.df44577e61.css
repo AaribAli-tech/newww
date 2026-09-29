@@ -238,6 +238,14 @@ canvas#gameCanvas{display:block;width:100vw;height:100vh}
 /* ══════════════════════ HUD ══════════════════════ */
 #hud{position:fixed;inset:0;z-index:100;pointer-events:none;display:none;opacity:0;transition:opacity .3s}
 #hud.on{display:block;opacity:1}
+/* The wrapper around the four right-hand readouts is not a box on a desktop:
+   `display:contents` drops it out of layout entirely, so the killfeed, the ammo,
+   the slots and the streak tiles are placed by the very same rules they always
+   were. On a phone it becomes a real flex column — see the phone section. */
+#hudRight{display:contents}
+/* The same trick on the other edge: the minimap and the match block are their own
+   corners on a desktop, and one column on a phone. */
+#hudLeft{display:contents}
 
 /* crosshair */
 #crosshair{position:absolute;top:50%;left:50%;width:0;height:0}
@@ -583,6 +591,9 @@ canvas#gameCanvas{display:block;width:100vw;height:100vh}
   /* The grid the thumb cluster is laid out on: two rows, three columns, each one
      step = a button plus a gutter from the next. Every placement below is written
      in these, so one number changes the whole cluster. */
+  /* Where the row of top-centre chips ends, one gap lower: the top of both readout
+     columns, so neither can be placed by a number that a bigger button invalidates. */
+  --topRow:calc(var(--gap) + var(--mini) + var(--gap));
   --row1:calc(var(--gap) + (var(--fire) - var(--mini)) / 2 + env(safe-area-inset-bottom,0px));
   --row2:calc(var(--gap) + var(--fire) + var(--gap) + env(safe-area-inset-bottom,0px));
   --c1:calc(var(--gap) + var(--fire) + var(--gap) + env(safe-area-inset-right,0px));
@@ -590,8 +601,17 @@ canvas#gameCanvas{display:block;width:100vw;height:100vh}
   --c3:calc(var(--c2) + var(--mini) + var(--gap));
   font-family:'Barlow Condensed',sans-serif;pointer-events:none;
   touch-action:none;-webkit-user-select:none;user-select:none;-webkit-touch-callout:none}
-#touchUI.on{display:block}
-#touchUI .tz{position:absolute;top:0;bottom:0;pointer-events:auto;touch-action:none}
+#touchUI.on,#touchPads.on{display:block}
+/* The pads are the lowest layer on purpose: they are invisible, so nothing is lost
+   by putting them UNDER the HUD, and everything the player taps (the pause and mute
+   chips, the killstreak tiles) lives inside #hud, which is its own stacking context
+   at z-index 100. A child of #hud can never rise above a sibling layer, so a
+   z-index on the chips themselves was never going to win the tap; the pads have to
+   come down instead. The visible buttons stay in #touchUI, above the HUD and above
+   the scope mask, so nothing can dim the thing you are pressing. */
+#touchPads{position:fixed;inset:0;z-index:90;display:none;pointer-events:none;
+  touch-action:none;-webkit-user-select:none;user-select:none;-webkit-touch-callout:none}
+.tz{position:absolute;top:0;bottom:0;pointer-events:auto;touch-action:none}
 #stickZone{left:0;width:40%}
 #lookZone{left:40%;right:0}
 /* The stick is drawn where the thumb lands, which is the single thing that makes a
@@ -644,10 +664,17 @@ canvas#gameCanvas{display:block;width:100vw;height:100vh}
 #touchUI.roam #tDown,#touchUI.roam #tUp,#touchUI.roam #tNext{display:grid}
 #touchUI.roam #tFire,#touchUI.roam #tFire2,#touchUI.roam #tAds,#touchUI.roam #tReload,
 #touchUI.roam #tSwap,#touchUI.roam #tJump{display:none}
+/* Down, but not roaming: the death card has the screen and the combat cluster goes
+   with it. The same set the roam camera hides, for the same reason — a trigger over
+   a body is a button that does nothing, drawn over the one thing worth reading. */
+#touchUI.dead #tFire,#touchUI.dead #tFire2,#touchUI.dead #tAds,#touchUI.dead #tReload,
+#touchUI.dead #tSwap,#touchUI.dead #tJump,#touchUI.dead #tCrouch,#touchUI.dead #tSprint{display:none}
 body.touch #skipRound{display:none}           /* #tSkip is the same action, sized for a thumb */
 /* The mute and pause chips live in the HUD, not the touch layer, so they stay put
    over a menu; they only get thumb-sized on a phone. */
-body.touch #gameBtns{gap:6px;z-index:130}
+body.touch #gameBtns{gap:6px;z-index:130;
+  top:calc(var(--gap) + env(safe-area-inset-top,0px));
+  right:calc(16px + env(safe-area-inset-right,0px))}
 body.touch #gameBtns .gbtn{width:38px;height:38px;font-size:15px}
 /* The streak tiles are the only HUD widgets you have to press, so they sit ABOVE
    the look pad (otherwise a tap meant for Airstrike turns the camera instead) and
@@ -672,13 +699,36 @@ body.touch #tFull{left:calc(50% - var(--mini) * 2.15);right:auto;
    The media query rather than the class, because `html` cannot be selected through
    a class on `body`, and because it must apply before touch.js has run. */
 @media (hover:none) and (pointer:coarse){
+  /* `manipulation`, deliberately not `none`: touch-action is intersected down from
+     the ancestors, so `none` here also meant none for every slider and every
+     scrolling card inside the menus — the settings panel could not be dragged or
+     scrolled with a thumb at all, which is what made a short screen feel like a
+     screen that does not fit. The surfaces that must never pan (the canvas, the
+     pads, the HUD, the buttons) each say `none` for themselves, below. */
   html,body{position:fixed;inset:0;width:100%;height:100%;min-height:100dvh;
-    overflow:hidden;overscroll-behavior:none;touch-action:none;
+    overflow:hidden;overscroll-behavior:none;touch-action:manipulation;
     -webkit-user-select:none;user-select:none;-webkit-touch-callout:none;
     -webkit-text-size-adjust:100%}
   #menu,#panel,#pause,#end,#diffGate,#board,#loader{min-height:100dvh}
   input{font-size:16px}                     /* below 16px iOS zooms the page on focus */
 }
+/* ── the four layers that draw the game are one rectangle ──
+   The size a phone reports and the size it shows are not the same thing: in
+   landscape a toolbar and a home bar lie over the bottom of the page, and `inset:0`
+   anchors to the *layout* viewport, so the trigger and the bottom row of readouts
+   could sit behind the browser's own chrome. touch.js measures the visual viewport
+   and publishes it as --vhpx; the canvas, the HUD, the pads and the buttons are
+   then that rectangle, anchored to the top. Before the script runs the fallback is
+   100vh, which is what the layers used to be. */
+body.touch #gameCanvas, body.touch #hud, body.touch #touchUI, body.touch #touchPads{
+  height:var(--vhpx,100vh);bottom:auto;touch-action:none}
+body.touch #gameCanvas{position:fixed;left:0;top:0}
+/* The menu is the one card that is not a `body.touch .card`, so it scrolls itself
+   — with `margin:auto` doing the centring, because a centred flex item that
+   overflows clips its own top and puts Deploy out of reach on a 320 px screen. */
+body.touch #menu{overflow-y:auto}
+body.touch #menu .menuInner{margin:auto}
+body.touch #menu::after{position:fixed}
 /* Portrait: cover the game rather than let someone squint at a quarter of it.
    Pure CSS, so there is no resize handler to forget to unbind. */
 @media (hover:none) and (pointer:coarse) and (orientation:portrait){
@@ -705,17 +755,25 @@ body.touch #tFull{left:calc(50% - var(--mini) * 2.15);right:auto;
   body.touch #menuFoot{font-size:10px;letter-spacing:.22em;bottom:6px}
   body.touch .menuBtn{padding:8px 14px;letter-spacing:.2em;font-size:12.5px}
   body.touch #hud{font-size:12px}
-  body.touch #miniWrap{top:calc(10px + env(safe-area-inset-top,0px));left:calc(10px + env(safe-area-inset-left,0px));
-    width:118px;height:118px}
-  body.touch #matchBar{top:calc(132px + env(safe-area-inset-top,0px));left:calc(10px + env(safe-area-inset-left,0px));width:118px}
-  body.touch #matchBar #modeLine, body.touch #matchBar #modeState{font-size:10px}
-  body.touch #nukeTrack{width:min(260px,52vw);top:calc(8px + env(safe-area-inset-top,0px))}
-  body.touch #killfeed{top:calc(44px + env(safe-area-inset-top,0px));right:calc(8px + env(safe-area-inset-right,0px));gap:2px}
-  body.touch #killfeed .kf{font-size:10.5px;line-height:14px;padding:1px 6px}
-  body.touch #killfeed .kf:nth-child(n+4){display:none}      /* three lines, then stop covering the map */
+  /* The two left-hand blocks are one column now (#hudLeft): the minimap is the size
+     that column can afford above the left trigger, and the match block is two scores
+     on one line plus the clock. The static mode name and the "first to 75" line go —
+     the scoreboard carries both, and they were the rows the trigger was printed
+     across. The round pips stay (they change), with the lives count beside them. */
+  body.touch #miniWrap{width:118px;height:118px}
+  body.touch #matchBar{width:118px;gap:4px}
+  body.touch #teamBars{flex-direction:row;gap:8px}
+  body.touch .tb{flex:1;gap:5px}
+  body.touch .tb .sc{font-size:18px;width:22px}
+  body.touch #timer{font-size:16px}
+  body.touch #roundPips{gap:5px}
+  body.touch #roundPips i{width:8px;height:4px}
+  body.touch #livesTag{font-size:9px}
+  body.touch #modeLine, body.touch #modeState{display:none}
+  /* The feed, the ammo block and the reward tiles are one column now (see the
+     phone section); the numbers they used to be placed by are gone with it. */
   body.touch #eventFeed{font-size:12px}
-  body.touch #healthWrap{left:calc(12px + env(safe-area-inset-left,0px));bottom:calc(10px + env(safe-area-inset-bottom,0px))}
-  body.touch #hpNum{font-size:22px}
+  body.touch #hpNum{font-size:22px}      /* its corner is set once, in the phone section */
   body.touch #hpBar{width:104px}
   body.touch .stk .ky{display:none}                          /* no keyboard on a phone to key-map */
   body.touch #reloadHint, body.touch #pauseHint, body.touch #ntHint{display:none}
@@ -733,36 +791,86 @@ body.touch #tFull{left:calc(50% - var(--mini) * 2.15);right:auto;
   body.touch #modePick button{padding:5px 9px;font-size:11.5px}
   body.touch #menuName,body.touch #menuDiff{margin-top:5px}
   body.touch #killfeed .kf:nth-child(n+3){display:none}
-  body.touch #matchBar{top:calc(126px + env(safe-area-inset-top,0px))}
-  body.touch #miniWrap{width:104px;height:104px}
+  body.touch #hudLeft{gap:6px}                 /* the column moves as one, so gaps only */
 }
 /* ═════════════════ PHONE: THE RIGHT EDGE BELONGS TO THE THUMB ═════════════════
-   Four readouts used to live down there with the trigger (ammo, weapon chips, the
-   streak tiles, the kill feed). On a phone that whole area is covered by a hand, so
-   they are re-stacked into the one column nothing else needs, top-right under the
-   mute and pause chips: feed, ammo, weapons, streaks. Specificity and file order
-   both put these on top of the rules above, which is why they sit after them. */
-body.touch #killfeed{top:calc(56px + env(safe-area-inset-top,0px));
-  right:calc(16px + env(safe-area-inset-right,0px));width:min(180px,29vw);gap:2px}
+   Everything in this corner used to be absolutely placed off the top edge: the
+   feed at 56 px, the ammo at 112, the weapon slots at 146, the streak tiles at
+   172. Each number was right on its own and wrong together — the ammo block is
+   86 px tall on a desktop (a 68 px counter), so it was printed straight across
+   the slot strip and the reward tiles, and on a short screen the whole pile ran
+   into the thumb grid, which grows upward from the bottom inset. Four fixed
+   offsets cannot know about each other; a flex column can. The wrapper is the
+   only thing that is placed now: pinned under the mute and pause chips at the
+   top, and stopped above the jump row at the bottom, so the column can never
+   reach a thumb. The readouts inside it are ordinary flow. */
+body.touch #hudRight{position:absolute;top:calc(var(--topRow) + env(safe-area-inset-top,0px));
+  right:calc(16px + env(safe-area-inset-right,0px));left:auto;bottom:calc(var(--row2) + var(--mini) + var(--gap));
+  display:flex;flex-direction:column;align-items:flex-end;justify-content:flex-start;
+  gap:4px;overflow:hidden}                      /* the backstop: clip, never overlap */
+body.touch #nukeTrack, body.touch #killfeed, body.touch #brWrap, body.touch #slots,
+body.touch #streakCol{position:static;top:auto;right:auto;bottom:auto;left:auto;transform:none;
+  align-self:flex-end}
+body.touch #killfeed{width:min(180px,29vw);gap:2px}
 body.touch #killfeed .kf{font-size:10.5px;line-height:14px;padding:1px 6px}
 body.touch #killfeed .kf:nth-child(n+4){display:none}   /* three lines, on any size */
-body.touch #brWrap{top:calc(112px + env(safe-area-inset-top,0px));
-  right:calc(16px + env(safe-area-inset-right,0px));bottom:auto;left:auto;
-  flex-direction:row-reverse;align-items:center;gap:8px}
+body.touch #brWrap{flex-direction:row-reverse;align-items:center;gap:8px}
 body.touch #equip{flex-direction:row;padding-bottom:0;gap:4px}
 body.touch .eq{min-width:0;padding:2px 6px}
-body.touch #slots{top:calc(146px + env(safe-area-inset-top,0px));
-  right:calc(16px + env(safe-area-inset-right,0px));bottom:auto}
-body.touch #streakCol{top:calc(172px + env(safe-area-inset-top,0px));
-  right:calc(12px + env(safe-area-inset-right,0px));bottom:auto;transform:none;
-  flex-direction:row;gap:4px}
+/* A 68 px ammo counter is a desktop number: on a phone it alone was taller than
+   the whole readout column it shares with the feed and the rewards. */
+body.touch #ammoCur{font-size:34px}
+body.touch #ammoRes{font-size:15px}
+body.touch #wpnName{font-size:13px}
+body.touch #fireStrip{margin-top:3px}
+body.touch #streakCol{flex-direction:row;gap:4px}
 body.touch .stk{width:44px;height:28px;font-size:9px;pointer-events:auto;gap:0}
 body.touch .stk .ic{font-size:13px}
 body.touch .stk .nm{font-size:7.5px;letter-spacing:.8px}
-body.touch #nukeTrack{top:auto;bottom:calc(var(--mini) * 2.6 + env(safe-area-inset-bottom,0px));
-  left:calc(12px + env(safe-area-inset-left,0px));transform:none;width:min(220px,38vw)}
+/* The nuke bar has no other corner to go to — the bottom of the left edge is the
+   left trigger, the top of it is the minimap, and the whole right edge is the column
+   above — so it joins that column, which places it under the chips and above the
+   feed without another offset to keep in step. It is the first thing to be clipped
+   if a screen is too short for the whole column, and the least missed. */
+body.touch #nukeTrack{width:min(200px,34vw);margin:0}
+/* ── the left edge: the minimap and the match block, above the left trigger ──
+   The mirror of #hudRight, and for the same reason. The minimap and the match block
+   are pinned to the top-left; the trigger the left thumb rests above reaches up
+   `--base + 3 gaps + .72 of a trigger` from the bottom, which on a 375-px screen with
+   a home bar under it is 190 px — high enough to be printed across the mode line, or
+   across the round pips in a one-life mode. One box, bounded at the bottom by that
+   trigger and clipped inside it, cannot do that however the numbers are retuned. */
+body.touch #hudLeft{position:absolute;top:calc(10px + env(safe-area-inset-top,0px));
+  left:calc(10px + env(safe-area-inset-left,0px));right:auto;bottom:auto;
+  height:calc(100% - var(--base) - var(--gap) * 4 - var(--fire) * .72 - 10px
+    - env(safe-area-inset-top,0px) - env(safe-area-inset-bottom,0px));
+  display:flex;flex-direction:column;align-items:flex-start;gap:8px;overflow:hidden}
+body.touch #miniWrap, body.touch #matchBar{position:static;top:auto;right:auto;bottom:auto;left:auto}
+/* The wrapper was shrunk for a phone and the 200 px canvas inside it was not: the map
+   was drawn straight over the match bar and the left trigger on every phone. It is the
+   size of its box now; the canvas above it is 400×400, so it only ever gets sharper. */
+body.touch #miniCanvas{width:100%;height:100%}
 body.touch #healthWrap{bottom:calc(var(--mini) + var(--gap) * 2 + env(safe-area-inset-bottom,0px));
   left:calc(12px + env(safe-area-inset-left,0px))}
+@media (max-height:460px){
+  body.touch #slots{display:none}
+  body.touch #miniWrap{width:96px;height:96px}
+  body.touch .tb .sc{font-size:16px}
+}
+@media (max-height:340px){
+  body.touch #killfeed{display:none}
+  body.touch #miniWrap{width:84px;height:84px}
+  body.touch .tb .sc{font-size:14px}
+  body.touch #timer{font-size:14px}
+  body.touch #roundPips{display:none}          /* the round row goes before the clock */
+}
+
+/* While you are down, the death card takes the screen but nothing on it can be
+   pressed. It kept its own pointer events, which made the SKIP chip and the pause
+   chip underneath it dead for the second the collapse takes — the two buttons the
+   card itself tells you to use. Only the death card: the pause, end and menu cards
+   have buttons of their own. */
+body.touch #death{pointer-events:none}
 
 /* Touch-only rows in the Controls card, and the keyboard list it replaces. */
 body:not(.touch) .touchRow{display:none}
