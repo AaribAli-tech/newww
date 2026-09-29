@@ -559,9 +559,12 @@ const KILL_TARGET = 200;
 
 class FreeForAll extends BaseMode {
     constructor(meta, ctx) {
-        super(meta, ctx, { teamSize: 4, scoreLimit: Infinity, timeLimit: Infinity, usesKillstreaks: false });
-        // Every reward off, not just hidden — see the note above.
-        this.disabledStreaks = new Set(['uav', 'air', 'nuke']);
+        super(meta, ctx, { teamSize: 4, scoreLimit: Infinity, timeLimit: Infinity, usesKillstreaks: true });
+        // Recon and a bomb run are fair in a free-for-all — you still have to earn
+        // four and seven kills in a room where everybody is shooting at everybody.
+        // The nuke is the one reward this mode cannot allow: it wipes every name on
+        // the scoreboard at once, and here that is the entire match.
+        this.disabledStreaks = new Set(['nuke']);
         this.target = KILL_TARGET;
         this.champion = '';
         this._capKey = null;
@@ -690,11 +693,13 @@ class FreeForAll extends BaseMode {
  */
 class GunGame extends BaseMode {
     constructor(meta, ctx) {
-        super(meta, ctx, { teamSize: 5, scoreLimit: Infinity, timeLimit: Infinity, usesKillstreaks: false });
-        // Rewards are off in both senses — hidden, and unusable by key. A nuke
-        // would clear the whole enemy team at once, which in this mode is five
-        // free rungs, and the match ends on a ladder, not on a streak.
-        this.disabledStreaks = new Set(['uav', 'air', 'nuke']);
+        super(meta, ctx, { teamSize: 5, scoreLimit: Infinity, timeLimit: Infinity, usesKillstreaks: true });
+        // The UAV and the airstrike are on — a spotter and a bomb run still have
+        // to be earned with a 4 and a 7 kill run, and every kill they cause moves
+        // you up the ladder like any other kill. Only the nuke stays off, in both
+        // senses: it clears every name at once, which here is five free rungs, and
+        // this match is meant to end on a ladder, not on a streak.
+        this.disabledStreaks = new Set(['nuke']);
         this.rungs = LADDER.length;
         this.killTarget = GUN_GAME_KILLS;
         // The whole ladder is four guns, so the viewmodel builds those four and

@@ -147,8 +147,10 @@ group('modes.js — Free For All');
     const m = createMode('ffa', ctx);
     ok('the mode is registered', m.name === 'Free For All');
     ok('it tells the HUD there are no teams', m.noTeams === true);
-    ok('killstreaks are off, and unusable rather than merely hidden',
-        m.usesKillstreaks === false && ['uav', 'air', 'nuke'].every(k => m.disabledStreaks.has(k)));
+    ok('the free-for-all keeps its rewards and refuses only the nuke, at the gate',
+        m.usesKillstreaks === true && ['uav', 'air'].every(k => !m.disabledStreaks.has(k))
+        && m.disabledStreaks.has('nuke'),
+        [...(m.disabledStreaks || [])].join(',') || 'nothing off');
     ok('the clock does not run out', !isFinite(m.timeLimit) && !isFinite(m.scoring.timeRemaining) === false
         || m.scoring.timeRemaining === Infinity);
     ok('respawning stays on', m.canRespawn(player) === true && m.canRespawn(bots[0]) === true);
@@ -917,8 +919,8 @@ group('gun game — one gun at a time until 75');
     const au = await readFile(new URL('../src/js/audio.js', import.meta.url), 'utf8');
     ok('a disabled killstreak is refused at the gate, not only in the HUD',
         /canUse\(id\) \{ return this\.isEnabled\(id\) && this\.progress\(id\)\.ready/.test(ks));
-    ok('and the game does not promise a reward the mode removed',
-        /if \(p\.enabled && !streaks\.used\[id\]\)/.test(mj));
+    ok('and a reward the mode removed is explained, not promised or hidden',
+        /\$\{label\} OFF IN THIS MODE/.test(mj) && /\$\{label\} ALREADY USED/.test(mj));
     ok('every HTML page revalidates, not just the root one',
         /ext === '\.html'\) return 'public, max-age=0, must-revalidate'/.test(sv)
         && !/rel === 'index\.html'/.test(sv));
@@ -1510,6 +1512,50 @@ group('crouch, the graphics driver, and nothing floating');
         if (four.progress('uav').ready) return false;
         four.onPlayerDeath();
         return four.progress('uav').ready === true && four.use('uav') === true;
+    })());
+    // The streaks were arming fine in Team Deathmatch and doing literally nothing
+    // in Free For All and Gun Game, because those two modes switched all three
+    // rewards off. That is a rules decision, but it was silent, and silent reads
+    // as broken. This is the check that it never goes silent or fully off again.
+    ok('every mode lets you call in the UAV and the airstrike, and gates only the nuke', await (async () => {
+        const { createMode } = await import('../src/js/modes.js');
+        const off = {};
+        for (const id of ['tdm', 'ctl', 'ffa', 'gun']) {
+            const m = createMode(id, {
+                player: null, getBots: () => [], hud: { banner() { } }, effects: {}, scene: {}, audio: {},
+            });
+            off[id] = m.disabledStreaks ? Array.from(m.disabledStreaks).sort().join(',') : '';
+            if (m.usesKillstreaks === false) return false;
+        }
+        return off.tdm === '' && off.ctl === 'nuke' && off.ffa === 'nuke' && off.gun === 'nuke';
+    })(), 'tdm: none off · ctl/ffa/gun: nuke only');
+    ok('earn four kills in a free-for-all and the UAV is really callable', await (async () => {
+        stubAudio();
+        const { createMode } = await import('../src/js/modes.js');
+        const { Killstreaks } = await import('../src/js/killstreaks.js');
+        const mode = createMode('ffa', {
+            player: null, getBots: () => [], hud: { banner() { } }, effects: {}, scene: {}, audio: {},
+        });
+        const ks = new Killstreaks({
+            player: { position: { x: 0, z: 0 }, killStreak: 4, matchKills: 4, alive: true },
+            hud: { banner() { } }, scene: { add() { }, remove() { } }, effects: {}, getBots: () => [],
+            getMode: () => mode,
+        });
+        return ks.progress('uav').ready === true && ks.canUse('uav') === true
+            && ks.progress('air').ready === false
+            && ks.progress('nuke').ready === false && ks.canUse('nuke') === false
+            && ks.use('uav') === true;
+    })(), 'the nuke is the only reward the free-for-all refuses');
+    ok('a streak key always answers, whether it is off, spent, or not earned yet', await (async () => {
+        const mj = await readFile(new URL('../src/js/main.js', import.meta.url), 'utf8');
+        const body = mj.slice(mj.indexOf('function tryStreak'), mj.indexOf('function tryStreak') + 1600);
+        return /OFF IN THIS MODE/.test(body) && /ALREADY USED/.test(body) && /NOT READY/.test(body)
+            && (body.match(/hud\.banner/g) || []).length >= 3
+            && /else\s+hud\.banner\('NOT READY'/.test(body);
+    })(), 'no branch of tryStreak returns in silence');
+    ok('and a reward the ruleset forbids gets no tile in the HUD', await (async () => {
+        const hud = await readFile(new URL('../src/js/hud.js', import.meta.url), 'utf8');
+        return /el\.classList\.toggle\('hidden', !p\.enabled\)/.test(hud);
     })());
     ok('the garage rack stands on two full-height end panels, one per side', countNear(0.6, 2.57, 0.1, [], 0) === 4,
         `${countNear(0.6, 2.57, 0.1, [], 0)} panels — two per garage, from the floor to the top board`);

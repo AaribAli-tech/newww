@@ -1148,12 +1148,16 @@ function tryStreak(id) {
     if (state !== 'playing' || !player.alive) return;
     if (!streaks.canUse(id)) {
         const p = streaks.progress(id);
-        // `enabled` matters: Free For All and Gun Game have no rewards to call in,
-        // and telling a player they are 3/7 kills from an airstrike that does not
-        // exist in this mode is a promise the match will never keep.
-        if (p.enabled && !streaks.used[id]) {
+        const label = (STREAKS.find(x => x.id === id) || {}).label || 'THAT REWARD';
+        // Never silent. Two passes at this used to do nothing and say nothing,
+        // which is indistinguishable from a broken key: a reward the ruleset
+        // forbids, and a reward you already spent this life.
+        if (!p.enabled)
+            hud.banner(`${label} OFF IN THIS MODE`, 'rgba(255,255,255,.6)', 'This ruleset does not allow it');
+        else if (streaks.used[id])
+            hud.banner(`${label} ALREADY USED`, 'rgba(255,255,255,.6)', 'One per life — it re-arms when you die');
+        else
             hud.banner('NOT READY', 'rgba(255,255,255,.6)', `${p.have}/${p.need} kills`);
-        }
         return;
     }
     streaks.use(id);

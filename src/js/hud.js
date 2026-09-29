@@ -429,6 +429,9 @@ export class HUD {
                 el.style.display = '';
                 const used = killstreaks.used ? killstreaks.used[st.id] : false;
                 el.classList.toggle('ready', p.ready);
+                // A reward this ruleset forbids gets no tile at all — a chip that
+                // can only ever read 0/15 is a promise the match will not keep.
+                el.classList.toggle('hidden', !p.enabled);
                 el.classList.toggle('used', !!used);
                 txt(el.querySelector('.pg'), used ? 'USED' : `${p.have}/${p.need}`);
             }
