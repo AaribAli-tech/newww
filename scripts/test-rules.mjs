@@ -1318,12 +1318,18 @@ group('crouch, the graphics driver, and nothing floating');
         && /for \(const lx of \[-0\.17, 0\.17\]\) for \(const lz of \[-0\.17, 0\.17\]\)/.test(map));
     ok('so does the bungalow coffee table',
         /for \(const lx of \[-0\.5, 0\.5\]\) for \(const lz of \[-0\.22, 0\.22\]\)\n\s*deco\(0\.08, 0\.38, 0\.08, 18\.6 \+ lx, floor \+ 0\.19, 19\.8 \+ lz/.test(map));
-    ok('the wall ladder has stiles to the ground and the shelves have posts',
+    ok('the wall ladder has stiles to the ground',
         /for \(const sx2 of \[24\.72, 26\.08\]\)/.test(map)
-        && /deco\(0\.1, 2\.86, 0\.16, sx2, 1\.43, 24\.4, mats\.wood\);/.test(map)
-        && /for \(const oz2 of \[cz - 1\.45, cz \+ 0\.65\]\)/.test(map));
+        && /deco\(0\.1, 2\.86, 0\.16, sx2, 1\.43, 24\.4, mats\.wood\);/.test(map));
+    ok('the garage shelving is built from one frame, not three sets of loose boards',
+        /const RACK = \{ x: x1 - 0\.45, z: cz \+ 0\.1, y0: floor, top: 2\.72 \};/.test(map)
+        && /1\.5 \+ i \* 0\.6, RACK\.z, mats\.wood/.test(map)
+        && /, 1\.0, RACK\.z, mats\.wood, \{ tag: 'prop' \}/.test(map));
+    ok('and the hose reel bracket spans from the wall to the reel',
+        /new THREE\.BoxGeometry\(0\.34, 0\.5, 0\.5\)/.test(map)
+        && /b\.position\.set\(sx \* 10\.50, 1\.9, -27\.5\)/.test(map));
     ok('and the firehouse hose reel is bolted to something',
-        /new THREE\.BoxGeometry\(0\.14, 0\.5, 0\.5\)/.test(map));
+        /new THREE\.BoxGeometry\(0\.34, 0\.5, 0\.5\)/.test(map));
 
     // The real test. Not the source text: the built scene, measured. Each of
     // these pieces was put into the town with the size and count below, so if
@@ -1362,8 +1368,37 @@ group('crouch, the graphics driver, and nothing floating');
         `${countNear(0.08, 0.38, 0.08, tableSpots, 0.95)} legs by the tables`);
     ok('the wall ladders have stiles that reach the ground', countNear(0.1, 2.86, 0.16, [[25.4, 24.4], [-25.4, 24.4]], 1.2) === 4,
         `${countNear(0.1, 2.86, 0.16, [[25.4, 24.4], [-25.4, 24.4]], 1.2)} stiles`);
-    ok('and the garage shelves stand on two posts each', countNear(0.09, 2.7, 0.09, [], 0) === 4,
-        `${countNear(0.09, 2.7, 0.09, [], 0)} posts of that size in the town — two per garage, and that size is used for nothing else`);
+    ok('the garage rack stands on two full-height end panels, one per side', countNear(0.6, 2.57, 0.1, [], 0) === 4,
+        `${countNear(0.6, 2.57, 0.1, [], 0)} panels — two per garage, from the floor to the top board`);
+    {
+        // Measured in the built scene: the boards, the working shelf and the
+        // uprights must be one object, so their centres and spans are compared
+        // rather than the source text. A rack can be edited into three pieces
+        // without a single line of the loops changing.
+        const shelf = [], board = [], panel = [];
+        scene.traverse(o => {
+            if (!o.isMesh || !o.geometry) return;
+            bb.setFromObject(o);
+            bb.getSize(sz);
+            const W = sz.x / MAP_SCALE, H = sz.y / MAP_SCALE, D = sz.z / MAP_SCALE;
+            const rec = { cz: (bb.min.z + bb.max.z) / 2 / MAP_SCALE, minZ: bb.min.z / MAP_SCALE, maxZ: bb.max.z / MAP_SCALE };
+            if (Math.abs(W - 0.7) < 0.03 && Math.abs(H - 0.1) < 0.03 && Math.abs(D - 2.6) < 0.03) shelf.push(rec);
+            if (Math.abs(W - 0.55) < 0.03 && Math.abs(H - 0.06) < 0.03 && Math.abs(D - 2.2) < 0.03) board.push(rec);
+            if (Math.abs(W - 0.6) < 0.03 && Math.abs(H - 2.57) < 0.04 && Math.abs(D - 0.1) < 0.03) panel.push(rec);
+        });
+        ok('the upper boards are centred over the working shelf',
+            shelf.length === 2 && board.length === 6
+            && board.every(b => shelf.some(sh => Math.abs(b.cz - sh.cz) < 0.06)),
+            `${board.length} boards, ${shelf.length} shelves`);
+        ok('and every board reaches both uprights',
+            board.length > 0 && panel.length === 4
+            && board.every(b => {
+                const same = panel.filter(p => (p.cz > 0) === (b.cz > 0));
+                return same.length === 2 && b.minZ - Math.min(...same.map(p => p.cz)) < 0.35
+                    && Math.max(...same.map(p => p.cz)) - b.maxZ < 0.35;
+            }),
+            `${panel.length} uprights`);
+    }
     ok('every piece of furniture with a collider still has something under it', (() => {
         // Returns true, or a description. `ok` prints whichever it is, so a
         // failure here names the exact box instead of just saying 3.

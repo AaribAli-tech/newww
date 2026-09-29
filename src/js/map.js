@@ -555,13 +555,17 @@ function buildGarage(mats) {
     for (let i = 0; i < 4; i++) deco(0.14, 0.06, 3.4, x0 - 0.21, h - 1.02 + i * 0.24, 0.8, mats.dark, { cast: false });
 
     // ── contents, kept clear of the middle so bots can drive through ──
-    box(0.7, 0.1, 2.6, x1 - 0.45, 1.0, cz + 0.1, mats.wood, { tag: 'prop' });
-    for (const oz of [cz - 1.0, cz + 1.15]) deco(0.6, 0.85, 0.1, x1 - 0.45, 0.57, oz, mats.wood, { cast: false });
-    for (let i = 0; i < 3; i++) deco(0.55, 0.06, 2.2, x1 - 0.42, 1.5 + i * 0.6, cz - 0.4, mats.wood);
-    // The boards are bolted to the wall at one end and to a post at the other, so
-    // they stop being planks in mid-air. Same two uprights carry all three shelves.
-    for (const oz2 of [cz - 1.45, cz + 0.65])
-        deco(0.09, 2.7, 0.09, x1 - 0.68, 1.35, oz2, mats.wood);
+    // The shelving used to be three unrelated sets of boards: the working shelf
+    // centred on one line, the boards above it half a metre down the wall, and the
+    // uprights I added on a third line. Each piece touched something, but none of
+    // them touched each other, which is what "the shelf has its bottom part
+    // somewhere else" looks like. One unit now: two end panels from the floor to
+    // the top board, the shelf and the boards between them on the same centre.
+    const RACK = { x: x1 - 0.45, z: cz + 0.1, y0: floor, top: 2.72 };
+    for (const oz of [cz - 1.0, cz + 1.15])
+        deco(0.6, RACK.top - RACK.y0, 0.1, RACK.x, (RACK.top + RACK.y0) / 2, oz, mats.wood);
+    box(0.7, 0.1, 2.6, RACK.x, 1.0, RACK.z, mats.wood, { tag: 'prop' });
+    for (let i = 0; i < 3; i++) deco(0.55, 0.06, 2.2, x1 - 0.42, 1.5 + i * 0.6, RACK.z, mats.wood);
     for (const [dx, dz] of [[x0 + 0.85, z1 - 0.7], [x0 + 0.85, z1 - 1.6]]) {
         cylinder(0.32, 0.32, 0.9, 14, dx, 0.6, dz, M.rustyMetal(), { solid: true, tag: 'prop' });
     }
@@ -887,8 +891,11 @@ function fireStation() {
         reel.castShadow = true;
         // A bracket, or the reel is a red ring floating a metre off the wall.
         CTX.scene.add((() => {
-            const b = new THREE.Mesh(new THREE.BoxGeometry(0.14, 0.5, 0.5), M.plain(0x76706a, 0.6, 0.5));
-            b.position.set(sx * 10.34, 1.9, -27.5);
+            const b = new THREE.Mesh(new THREE.BoxGeometry(0.34, 0.5, 0.5), M.plain(0x76706a, 0.6, 0.5));
+            // The bay wall's inner face is at 10.64 and the reel's ring ends at
+            // 10.36, so the bracket has to bridge that: a plate against the wall
+            // with the reel bolted to it, rather than a plate in mid-air.
+            b.position.set(sx * 10.50, 1.9, -27.5);
             b.castShadow = true;
             return b;
         })());
