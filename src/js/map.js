@@ -68,8 +68,14 @@ let CTX = null;
  */
 function box(w, h, d, x, y, z, mat, opts = {}) {
     const s = CTX.s;
+    // ox/oz are the LOT ORIGIN: a builder that draws a house around authored x 18..28
+    // can then be stamped onto any piece of ground in the town by shifting the whole
+    // thing, mesh AND collider, in one place. Without this, every second row of
+    // houses would need its own copy of the coordinates - and would drift the first
+    // time somebody moved a wall.
+    const X = x * s + (CTX.ox || 0), Z = z + (CTX.oz || 0);
     const m = new THREE.Mesh(new THREE.BoxGeometry(w, h, d), mat);
-    m.position.set(x * s, y, z);
+    m.position.set(X, y, Z);
     if (opts.rotY) m.rotation.y = opts.rotY * s;
     if (opts.rotX) m.rotation.x = opts.rotX;
     if (opts.rotZ) m.rotation.z = opts.rotZ * s;
@@ -78,7 +84,7 @@ function box(w, h, d, x, y, z, mat, opts = {}) {
     CTX.scene.add(m);
     if (opts.solid !== false) {
         if (opts.rotY || opts.rotZ || opts.rotX) CTX.cw.addBoxMesh(m, opts.tag);
-        else CTX.cw.addAABB(x * s - w / 2, y - h / 2, z - d / 2, x * s + w / 2, y + h / 2, z + d / 2, opts.tag);
+        else CTX.cw.addAABB(X - w / 2, y - h / 2, Z - d / 2, X + w / 2, y + h / 2, Z + d / 2, opts.tag);
     }
     return m;
 }
@@ -86,7 +92,7 @@ function box(w, h, d, x, y, z, mat, opts = {}) {
 function cylinder(rt, rb, h, seg, x, y, z, mat, opts = {}) {
     const s = CTX.s;
     const m = new THREE.Mesh(new THREE.CylinderGeometry(rt, rb, h, seg), mat);
-    m.position.set(x * s, y, z);
+    m.position.set(x * s + (CTX.ox || 0), y, z + (CTX.oz || 0));
     if (opts.rotX) m.rotation.x = opts.rotX;
     if (opts.rotZ) m.rotation.z = opts.rotZ * s;
     if (opts.rotY) m.rotation.y = opts.rotY * s;
@@ -107,7 +113,7 @@ function pave(geo, mat, x, y, z, rotY = 0) {
     const m = new THREE.Mesh(geo, mat);
     m.rotation.x = -Math.PI / 2;
     if (rotY) m.rotation.z = -rotY;          // after the -90° X tilt, Z is yaw
-    m.position.set(x, y, z);
+    m.position.set(x + (CTX.ox || 0), y, z + (CTX.oz || 0));
     m.receiveShadow = true;
     CTX.scene.add(m);
     return m;
@@ -462,9 +468,16 @@ function buildHouse(kind) {
     deco(0.16, 0.22, d + 1.3, eaveX0, ceil - 0.02, cz, mats.trim);
     deco(0.16, 0.22, d + 1.3, eaveX1, ceil - 0.02, cz, mats.trim);
 
-    // ── exterior stone chimney on the north gable ──
-    box(1.0, 9.4, 0.9, 25.0, 4.7, -9.55, mats.stone, { tag: 'brick' });
-    deco(1.2, 0.2, 1.1, 25.0, 9.5, -9.55, mats.concrete);
+    // ── a small chimney through the roof, near the ridge ──
+    // It used to be a 1.0 x 9.4 m stone shaft standing on the ground against the
+    // OUTSIDE of the north wall — a full-height brick column from the foundation
+    // past the ridge, one per house, which is why every house looked like it had
+    // a wall pillar trailing off it. Real ones are a short stack through the roof
+    // with a course of brick below the ridge, so that is what this is now: 0.9 m
+    // wide, 2.6 m tall, its base buried in the roof structure so it cannot float.
+    box(0.9, 2.6, 0.7, 23.9, 5.9, -5.2, mats.stone, { tag: 'brick' });
+    deco(1.1, 0.14, 0.9, 23.9, 7.27, -5.2, mats.concrete);
+    deco(0.5, 0.16, 0.4, 23.9, 7.42, -5.2, mats.dark, { cast: false });
 
     buildPorchAndBalcony(mats, kind);
     return mats;
@@ -742,7 +755,7 @@ function buildBungalow(kind) {
     const slopeLen = Math.hypot(runR, rise), ang = Math.atan2(rise, runR);
     for (const sgn of [-1, 1]) {
         const m = new THREE.Mesh(new THREE.BoxGeometry(w + 1.1, 0.22, slopeLen), mats.roof);
-        m.position.set(cx * CTX.s, ceil + rise / 2, cz + sgn * runR / 2);
+        m.position.set(cx * CTX.s + (CTX.ox || 0), ceil + rise / 2, cz + sgn * runR / 2 + (CTX.oz || 0));
         m.rotation.x = sgn * ang;
         m.castShadow = true; m.receiveShadow = true;
         CTX.scene.add(m);
@@ -1036,7 +1049,7 @@ function wheel(x, y, z, radius, width, axis = 'z') {
     g.userData.nkWheel = true;             // so a rule can measure tyres vs bodies
     g.rotation.x = axis === 'z' ? Math.PI / 2 : 0;
     if (axis === 'x') g.rotation.z = Math.PI / 2;
-    g.position.set(x * s, y, z);
+    g.position.set(x * s + (CTX.ox || 0), y, z + (CTX.oz || 0));
     g.traverse(o => { if (o.isMesh) { o.castShadow = true; o.receiveShadow = true; } });
     CTX.scene.add(g);
     return g;
@@ -1232,7 +1245,20 @@ function watchTower(x, z) {
     }
     deco(4.4, 0.16, 4.4, x, 9.6, z, metal);
     for (const ox of [-1.6, 1.6]) deco(0.1, 1.4, 0.1, x + ox, 8.9, z + 1.6, metal, { cast: false });
-    for (let i = 0; i < 14; i++) deco(0.9, 0.06, 0.06, x, 0.5 + i * 0.55, z - 1.85, metal, { cast: false });
+    // Two ladders, one on each long side, so the platform is a route and not a
+    // prize you can only look at. The rungs used to float on their own — fourteen
+    // short bars bolted to nothing, which is what "the outpost still has no
+    // ladders" means. Same build as the wall ladders on the houses: two stiles to
+    // the ground with a foot plate, and a rung every 0.55 m, inside the 0.62 step.
+    for (const side of [-1, 1]) {
+        const zL = z + side * 1.85;
+        for (const ox of [-0.45, 0.45]) {
+            deco(0.1, 8.1, 0.1, x + ox, 4.05, zL, metal, { cast: false });
+            deco(0.16, 0.06, 0.16, x + ox, 0.03, zL, metal, { cast: false });
+        }
+        for (let i = 0; i < 15; i++)
+            deco(0.9, 0.07, 0.07, x, 0.45 + i * 0.55, zL, metal, { cast: false });
+    }
     const siren = new THREE.Mesh(new THREE.CylinderGeometry(0.3, 0.42, 0.5, 10), M.rustyMetal());
     siren.position.set(x * CTX.s, 9.9, z);
     siren.castShadow = true;
@@ -1251,7 +1277,10 @@ function frontYard(mats) {
     }
     // picket along the lot lines, open in the middle for the walk and drive
     picketRun(14.2, LOT_N, 14.2, -10.4);
-    picketRun(14.2, LOT_N, 32.0, LOT_N);
+    // A 9 m gateway where the access lane to the new row crosses the lot line —
+    // the road would otherwise dead-end into 1.2 m of white picket.
+    picketRun(14.2, LOT_N, 15.5, LOT_N);
+    picketRun(24.5, LOT_N, 32.0, LOT_N);
     picketRun(16.4, LOT_S, 32.0, LOT_S);
     // mailbox at the kerb
     cylinder(0.05, 0.05, 1.1, 6, 13.2, 0.55, -7.6, M.wood(), { solid: false });
@@ -1370,6 +1399,56 @@ function circleCover() {
 // ============================================================================
 // ONE SIDE OF THE MAP
 // ============================================================================
+/**
+ * One bungalow lot, stamped onto a piece of ground and turned to face the street.
+ * Same builder, same paving, same materials as the two the town was born with -
+ * a copy of the lot surfaces from buildSide, not a new idea of a house.
+ */
+function bungalowLotAt(ox, oz, s, kind) {
+    const prev = { s: CTX.s, ox: CTX.ox, oz: CTX.oz };
+    CTX.s = s; CTX.ox = ox; CTX.oz = oz;
+    const lawn = M.lawn(), concrete = M.concrete();
+    pave(new THREE.PlaneGeometry(17.0, 15.0), lawn, 21.0 * s, 0.028, 21.5);
+    pave(new THREE.PlaneGeometry(4.0, 5.0), concrete, 20.5 * s, 0.042, 14.2);
+    buildBungalow(kind);
+    CTX.s = prev.s; CTX.ox = prev.ox; CTX.oz = prev.oz;
+}
+
+/**
+ * The new row's streets, so the extra ground is something you move along and not
+ * just something you walk across: two 9 m lanes drop south from the town's lot
+ * line (through a gateway cut in the picket fence) to Victory Drive, Victory Drive
+ * runs the width of the map along the front of the three houses, and Engine
+ * Street — the service alley, 6 m — runs behind them with a rear lane in each gap
+ * between houses. Three loops, so a route to the row never has to be retraced.
+ * Same asphalt material, same 9 m width, same kerb idiom as the roundabout.
+ *
+ * The alley is behind the row rather than in front of the fire station because
+ * that forecourt is already a field of sandbag emplacements, and a street that
+ * starts between two of them is not a street.
+ */
+function newStreets() {
+    const asphalt = M.asphalt(), sidewalk = M.sidewalk();
+    const H = ROAD_HALF;                                  // 4.5, half of the 9 m road
+    pave(new THREE.PlaneGeometry(81, H * 2), asphalt, 0, 0.020, -36);   // stops short of the wire        // Victory Drive
+    pave(new THREE.PlaneGeometry(H * 2, 23), asphalt, -20, 0.020, -24.5);    // west lane
+    pave(new THREE.PlaneGeometry(H * 2, 23), asphalt, 20, 0.020, -24.5);     // east lane
+    // Engine Street, the service alley behind the row, with a rear lane between
+    // every pair of houses. It runs behind the firehouse instead of in front of
+    // it: the forecourt there is already a field of sandbag emplacements, and a
+    // road that starts between two of them is not a road.
+    pave(new THREE.PlaneGeometry(60, 6), asphalt, 0, 0.020, -67.5);           // alley
+    for (const sx of [-1, 1])
+        pave(new THREE.PlaneGeometry(6, 31.5), asphalt, sx * 14, 0.020, -52.25);
+
+    // Kerbs, so the new tarmac has the same hard edge as the circle. 0.14 m tall
+    // and never collision, exactly like the ring round the roundabout: a kerb the
+    // bots have to path around makes them stupid.
+    for (const [w, d, x, z] of [[81, 0.3, 0, -31.4], [81, 0.3, 0, -40.6],
+    [60, 0.3, 0, -64.4], [60, 0.3, 0, -70.6]])
+        deco(w, 0.14, d, x, 0.10, z, sidewalk, { cast: false, solid: false });
+}
+
 function buildSide(s, kind) {
     CTX.s = s;
 
@@ -1404,8 +1483,13 @@ function buildSide(s, kind) {
     powerLine(8.6, 22.0, 8.6, 34.0, 8.55, 0.4);
     powerLine(14.8, -15.6, 15.6, 9.2, 7.95, 0.6);
 
-    // canonical coordinates — box() applies the mirror, so do not pre-multiply
-    watchTower(48.0, 24.0);
+    // The outpost used to stand at authored x 48, which is ten metres the WRONG
+    // SIDE of the chain-link: you could see it from inside the wire and never
+    // reach it, which is the whole reason "the outpost has no ladders" kept coming
+    // back — the ladders were irrelevant while the tower was outside the map. It
+    // now overlooks the new south row from ground the players can actually walk on,
+    // with ladders up both long sides.
+    watchTower(34.0, -60.0);
 }
 
 // ============================================================================
@@ -1421,7 +1505,9 @@ function buildGround() {
     desert.userData.nkNoScale = true;
     CTX.scene.add(desert);
 
-    pave(new THREE.PlaneGeometry(96, 90), M.dirt(), 0, 0.0, -2);
+    // The town pad: dirt under every lot and street. It reaches the new row now,
+    // which is why the south edge moved further than the north one.
+    pave(new THREE.PlaneGeometry(96, 132), M.dirt(), 0, 0.0, -22);
 
     const asphalt = M.asphalt();
     pave(new THREE.CircleGeometry(CIRCLE_R, 72), asphalt, 0, 0.020, 0);
@@ -1523,7 +1609,7 @@ function buildSky(scene) {
 // PUBLIC ENTRY
 // ============================================================================
 export function buildNuketown(scene, cw) {
-    CTX = { scene, cw, s: 1 };
+    CTX = { scene, cw, s: 1, ox: 0, oz: 0 };
 
     buildGround();
 
@@ -1534,6 +1620,17 @@ export function buildNuketown(scene, cw) {
 
     // ── everything that straddles the axis, built once ──
     fireStation();
+
+    // ── the south row: three more houses on ground that used to be empty sand ──
+    // Oz puts a bungalow's own z 17..26 at -54..-45, which is the frontage of
+    // Victory Drive; the three ox values centre them at x -28, 0 and 28 with the
+    // middle one un-mirrored so its gable does not line up dead-centre with the
+    // lane. Each one is the same builder as the bungalows by the circle.
+    bungalowLotAt(-6.75, -71, -1, 'yellow');
+    bungalowLotAt(-21.25, -71, 1, 'teal');
+    bungalowLotAt(6.75, -71, 1, 'yellow');
+    newStreets();
+
     schoolBus();
     movingTruck();
     nuketownSign();
@@ -1557,7 +1654,7 @@ export function buildNuketown(scene, cw) {
 
     // world floor — authored half-width, scaled with everything else, and still
     // far bigger than the map so a soldier can never find its edge
-    cw.addAABB(-62, -1.0, -62, 62, 0.0, 62, 'ground');
+    cw.addAABB(-80, -1.0, -80, 80, 0.0, 80, 'ground');
 
     const sky = buildSky(scene);
 
@@ -1565,9 +1662,9 @@ export function buildNuketown(scene, cw) {
     const dustGeo = new THREE.BufferGeometry();
     const N = 520, pos = new Float32Array(N * 3);
     for (let i = 0; i < N * 3; i += 3) {
-        pos[i] = (Math.random() - 0.5) * 90;
+        pos[i] = (Math.random() - 0.5) * (B.maxX - B.minX) * 1.05;
         pos[i + 1] = Math.random() * 14;
-        pos[i + 2] = (Math.random() - 0.5) * 84;
+        pos[i + 2] = B.minZ + Math.random() * (B.maxZ - B.minZ) * 1.05;
     }
     dustGeo.setAttribute('position', new THREE.BufferAttribute(pos, 3));
     const dust = new THREE.Points(dustGeo, new THREE.PointsMaterial({
@@ -1751,7 +1848,12 @@ const SPAWN_EAST = [
     { x: 36.6, z: -4.0 }, { x: 38.4, z: 3.2 }, { x: 33.0, z: 10.5 },
     { x: 35.0, z: -11.0 }, { x: 30.4, z: 1.2 }, { x: 30.0, z: -16.0 },
     { x: 21.0, z: -17.5 }, { x: 16.8, z: -13.3 }, { x: 13.4, z: 4.8 },
-    { x: 21.0, z: 12.0 }, { x: 25.0, z: 10.0 }, { x: 28.0, z: 12.0 }, { x: 16.0, z: 10.0 }
+    { x: 21.0, z: 12.0 }, { x: 25.0, z: 10.0 }, { x: 28.0, z: 12.0 }, { x: 16.0, z: 10.0 },
+    // The new south row: one frontage per side, and a rear one behind the middle
+    // house. Both teams get each point because SPAWN_A mirrors this table, so a
+    // single entry here is two deployments twenty-eight metres apart in x — the
+    // same spacing the rest of the town uses.
+    { x: 24.0, z: -43.0 }, { x: 30.0, z: -33.0 }, { x: 12.0, z: -52.0 }
 ];
 export const SPAWN_A = atScale(SPAWN_EAST.map(mirrorXZ));   // west team, behind the teal house
 export const SPAWN_B = atScale(SPAWN_EAST.slice());         // east team, behind the yellow house
@@ -1807,7 +1909,16 @@ const EAST_NODES = [
 ];
 
 /** Navigation nodes — all on walkable ground, none inside a wall. */
+/**
+ * The south row is on the tables too, or it is scenery: a street the bots never
+ * walk down is a street the player only uses to hide in. These are the frontages of
+ * the three new bungalows and the lanes that reach them.
+ */
 export const WAYPOINTS = atScale([
+    { x: 0, z: -36 }, { x: -20, z: -29 }, { x: 20, z: -29 },
+    { x: -28, z: -42.5 }, { x: 0, z: -42.5 }, { x: 28, z: -42.5 },
+    { x: -14, z: -46 }, { x: 14, z: -46 }, { x: -14, z: -60 }, { x: 14, z: -60 },
+    { x: -28, z: -67.5 }, { x: 0, z: -67.5 }, { x: 28, z: -67.5 },
     ...AXIS_NODES,
     ...RING_NODES,
     ...EAST_NODES,

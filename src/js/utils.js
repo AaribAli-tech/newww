@@ -31,7 +31,12 @@ export const MAP_SCALE = 2.265625;
  * last house. Anything that measures the finished world (clamps, spawns, the
  * minimap frame, the AI's bounds) reads MAP_RECT below, which is the real thing.
  */
-export const MAP_RECT_AUTHORED = { minX: -42, maxX: 42, minZ: -40, maxZ: 38 };
+// The town pad. The east, west and north edges are the ones every existing lot
+// was drawn against; the south edge is what grew, and it grew into sand that
+// nobody could reach before — so the block inside the wire got bigger without
+// the empty desert outside it getting any further away. Houses stay their own
+// size because this rectangle is authored metres, not a scale on the scene.
+export const MAP_RECT_AUTHORED = { minX: -42, maxX: 42, minZ: -74, maxZ: 38 };
 
 export const MAP_RECT = {
     minX: MAP_RECT_AUTHORED.minX * MAP_SCALE, maxX: MAP_RECT_AUTHORED.maxX * MAP_SCALE,

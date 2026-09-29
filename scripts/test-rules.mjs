@@ -764,10 +764,15 @@ group('utils.js — the perimeter is a clamp, not a mesh');
 {
     const U = await import('../src/js/utils.js');
     ok('the rectangle is the authored footprint, multiplied as one piece',
-        Math.abs(U.MAP_RECT.maxX - 42 * U.MAP_SCALE) < 1e-9
-        && Math.abs(U.MAP_RECT.minZ + 40 * U.MAP_SCALE) < 1e-9
-        && Math.abs(U.MAP_RECT.minX + 42 * U.MAP_SCALE) < 1e-9
-        && Math.abs(U.MAP_RECT.maxZ - 38 * U.MAP_SCALE) < 1e-9);
+        ['minX', 'maxX', 'minZ', 'maxZ'].every(k =>
+            Math.abs(U.MAP_RECT[k] - U.MAP_RECT_AUTHORED[k] * U.MAP_SCALE) < 1e-9),
+        'no rule may hardcode an edge the map can move');
+    ok('the block inside the wire grew south into sand, and the outside did not move',
+        U.MAP_RECT_AUTHORED.minZ <= -70 && U.MAP_RECT_AUTHORED.maxX === 42
+        && U.MAP_RECT_AUTHORED.minX === -42 && U.MAP_RECT_AUTHORED.maxZ === 38
+        && ((U.MAP_RECT_AUTHORED.maxX - U.MAP_RECT_AUTHORED.minX)
+            * (U.MAP_RECT_AUTHORED.maxZ - U.MAP_RECT_AUTHORED.minZ)) > 84 * 78 * 1.35,
+        `${(U.MAP_RECT_AUTHORED.maxX - U.MAP_RECT_AUTHORED.minX)} × ${(U.MAP_RECT_AUTHORED.maxZ - U.MAP_RECT_AUTHORED.minZ)} m authored`);
     ok('the playable block grew 45%, then 25%, then 25% more',
         Math.abs(U.MAP_SCALE - 1.45 * 1.25 * 1.25) < 1e-9
         && (U.MAP_RECT.maxX - U.MAP_RECT.minX) > 84 * 1.7 && (U.MAP_RECT.maxZ - U.MAP_RECT.minZ) > 78 * 1.7,
@@ -1001,9 +1006,14 @@ group('map scale — geometry, collision, tables and textures move together');
     ok('the authored rectangle is the only source of the scaled one',
         /minX: MAP_RECT_AUTHORED\.minX \* MAP_SCALE/.test(await readFile(new URL('../src/js/utils.js', import.meta.url), 'utf8')));
     ok('the world floor stops just past the fence, so there is no town outside the town',
-        /cw\.addAABB\(-62, -1\.0, -62, 62, 0\.0, 62, 'ground'\)/.test(map)
-        && 62 * U.MAP_SCALE > U.MAP_RECT.maxX + 30 && 62 * U.MAP_SCALE < 200,
-        `floor to ±${(62 * U.MAP_SCALE).toFixed(0)} m against a fence at ±${U.MAP_RECT.maxX.toFixed(0)} m`);
+        (() => {
+            const m2 = map.match(/cw\.addAABB\((-?\d+), -1\.0, (-?\d+), (\d+), 0\.0, (\d+), 'ground'\)/);
+            if (!m2) return false;
+            const half = Number(m2[3]);
+            return half * U.MAP_SCALE > U.MAP_RECT.maxX + 30 && half * U.MAP_SCALE < 220
+                && half * U.MAP_SCALE > Math.abs(U.MAP_RECT.minZ) + 10;
+        })(),
+        `floor ±${(80 * U.MAP_SCALE).toFixed(0)} m against a fence at ±${U.MAP_RECT.maxX.toFixed(0)} / ${U.MAP_RECT.minZ.toFixed(0)} m`);
     ok('the fog reaches across the wider ground',
         /new THREE\.Fog\(0xcfc4ac, 110 \* MAP_SCALE, Math\.min\(360 \* MAP_SCALE, VIEW_FAR \* 0\.92\)\)/.test(mj)
         && 110 * U.MAP_SCALE > 150, 'the street stays clear of haze, the horizon does not');
@@ -1379,7 +1389,7 @@ group('crouch, the graphics driver, and nothing floating');
     const { CollisionWorld } = await import('../src/js/physics.js');
     const mapMod = await import('../src/js/map.js');
     const THREE0 = await import('three');
-    const { MAP_SCALE } = await import('../src/js/utils.js');
+    const { MAP_SCALE, MAP_RECT } = await import('../src/js/utils.js');
     const scene = new THREE0.Scene();
     const cwx = new CollisionWorld();
     mapMod.buildNuketown(scene, cwx);
@@ -1641,6 +1651,99 @@ group('crouch, the graphics driver, and nothing floating');
             });
             return far === 0;
         })());
+    // ── the south row ───────────────────────────────────────────────────────
+    const rowWay = (mapMod.WAYPOINTS || []).filter(w => w.z / MAP_SCALE < -28).length;
+    const rowDeploy = [...mapMod.SPAWN_A, ...mapMod.SPAWN_B].filter(p => p.z / MAP_SCALE < -30).length;
+    const CEIL_H = 6.3;                                       // H.ceil, the upper ceiling slab
+    // ── the south row ───────────────────────────────────────────────────────
+    const { WAYPOINTS: WPS, SPAWN_A: SPA, SPAWN_B: SPB } = mapMod;
+    const mapWayNodes = WPS.filter(w => w.z / MAP_SCALE < -28).length;
+    const mapSpawnRow = [...SPA, ...SPB].filter(p => p.z / MAP_SCALE < -30).length;
+    const H_CEIL = 6.3;                                       // H.ceil, the upper ceiling slab
+    // Every new street, in authored metres, inset by 0.3 so the 0.12 m pad every
+    // fence collider sprouts (the map's own convention) does not read as a wall.
+    const NEW_STREETS = [['Victory', -40.5, 40.5, -40.5, -31.5],
+        ['west lane', -24.5, -15.5, -36, -13], ['east lane', 15.5, 24.5, -36, -13],
+        ['Engine alley', -30, 30, -70.5, -64.5],
+        ['west rear lane', 11, 17, -68, -36.5], ['east rear lane', -17, -11, -68, -36.5]];
+    const INSET = 0.3;
+    const SOFT_ON_ROAD = new Set(['bush', 'grass', 'kerb', 'deco', 'line']);
+    const onRoads = (() => {
+        let n = 0;
+        for (const [, a, c, t0, t1] of NEW_STREETS) {
+            for (const b of cwx.boxes) {
+                if (b.tag === 'ground' || b.tag === 'bound') continue;
+                // Soft cover is walk-through by design (physics.js SOFT_COVER), and
+                // a roof 5 m up is not standing in anybody's road.
+                if (SOFT_ON_ROAD.has(b.tag) || b.minY / MAP_SCALE > 1.0) continue;
+                const x0 = b.minX / MAP_SCALE + INSET, x1 = b.maxX / MAP_SCALE - INSET;
+                const z0 = b.minZ / MAP_SCALE + INSET, z1 = b.maxZ / MAP_SCALE - INSET;
+                if (x0 < x1 && z0 < z1 && x0 < c && x1 > a && z0 < t1 && z1 > t0) n++;
+            }
+        }
+        return n;
+    })();
+    ok('the new streets are clear — nothing is parked on the tarmac',
+        onRoads === 0, `${onRoads} hard blockers on ${NEW_STREETS.length} new roads`);
+    const rowHouses = (() => {
+        const seen = new Set();
+        cwx.boxes.forEach(b => {
+            if (b.tag !== 'solid') return;
+            const cz = (b.minZ + b.maxZ) / 2 / MAP_SCALE;
+            const h = (b.maxY - b.minY) / MAP_SCALE;
+            if (cz < -40 && cz > -74 && h > 1.8)
+                seen.add(Math.round((b.minX + b.maxX) / 2 / MAP_SCALE / 6));
+        });
+        return seen.size;
+    })();
+    ok('three more houses stand on the new ground, in the style of the others',
+        (map.match(/bungalowLotAt\(/g) || []).length === 4 && rowHouses >= 3,
+        `${rowHouses} separate building stacks on the new ground`);
+    ok('and they are on the tables the game actually uses, not just the ones you look at',
+        rowWay >= 7 && rowDeploy >= 3,
+        `${mapWayNodes} nav nodes and ${mapSpawnRow} deploy candidates on the new ground`);
+    const stacks = (() => {
+        let n = 0, inroof = 0;
+        scene.traverse(o => {
+            if (!o.isMesh || !o.geometry) return;
+            bb.setFromObject(o); bb.getSize(sz);
+            if (Math.abs(sz.x / MAP_SCALE - 0.9) > 0.05 || Math.abs(sz.y / MAP_SCALE - 2.6) > 0.05
+                || Math.abs(sz.z / MAP_SCALE - 0.7) > 0.05) return;
+            n++;
+            const cx = (bb.min.x + bb.max.x) / 2 / MAP_SCALE, cz = (bb.min.z + bb.max.z) / 2 / MAP_SCALE;
+            if (Math.abs(Math.abs(cx) - 23.9) < 0.6 && Math.abs(cz + 5.2) < 0.6
+                && bb.min.y / MAP_SCALE > 4.0 && bb.min.y / MAP_SCALE < CEIL_H) inroof++;
+        });
+        return { n, inroof };
+    })();
+    ok('the chimneys are small stacks through the roof, not shafts up the outside wall',
+        stacks.n === 2 && stacks.inroof === 2 && !/9\.4, 0\.9, 25\.0, 4\.7, -9\.55/.test(map),
+        `${stacks.inroof}/${stacks.n} on the ridge, inside the wall line`);
+    // Matched by neighbourhood, not by size alone: a stile the same size as a radio
+    // mast is not evidence that the tower can be climbed.
+    const tower = (() => {
+        const [TX, TZ] = [34.0, -60.0];
+        let stiles = 0, footed = 0, rungs = 0;
+        scene.traverse(o => {
+            if (!o.isMesh || !o.geometry) return;
+            bb.setFromObject(o); bb.getSize(sz);
+            const cx = (bb.min.x + bb.max.x) / 2 / MAP_SCALE;
+            const cz = (bb.min.z + bb.max.z) / 2 / MAP_SCALE;
+            if (Math.abs(Math.abs(cx) - TX) > 3 || Math.abs(cz - TZ) > 3) return;
+            if (Math.abs(sz.x / MAP_SCALE - 0.1) < 0.02 && sz.y / MAP_SCALE > 7
+                && Math.abs(sz.z / MAP_SCALE - 0.1) < 0.02) {
+                stiles++;
+                if (bb.min.y / MAP_SCALE < 0.06) footed++;
+            }
+            if (Math.abs(sz.x / MAP_SCALE - 0.9) < 0.03 && sz.y / MAP_SCALE < 0.1) rungs++;
+        });
+        return { stiles, footed, rungs };
+    })();
+    ok('the outpost is inside the wire now, with ladders that reach the ground',
+        /watchTower\(34\.0, -60\.0\)/.test(map)
+        && 34.0 * MAP_SCALE < MAP_RECT.maxX - 2 && -60.0 * MAP_SCALE > MAP_RECT.minZ + 2
+        && tower.stiles === 8 && tower.footed === 8 && tower.rungs === 60,
+        `${tower.footed}/${tower.stiles} stiles on the ground, ${tower.rungs} rungs, both mirrored outposts`);
     ok('the garage rack stands on two full-height end panels, one per side', countNear(0.6, 2.57, 0.1, [], 0) === 4,
         `${countNear(0.6, 2.57, 0.1, [], 0)} panels — two per garage, from the floor to the top board`);
     {
