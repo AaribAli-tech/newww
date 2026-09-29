@@ -130,10 +130,15 @@ export function claimPoint(sp, team, seconds = 3) {
  * and a pane is not a wall. Same shapes the browser harness reads, so the two
  * never disagree about what "buried" means.
  */
+const _footScratch = [];
 function footingBlocked(cw, x, z) {
     if (!cw || !cw.boxes) return false;
     const r = 0.34;
-    for (const b of cw.boxes) {
+    // Broadphase, not every box in the map: this runs once per candidate spot on
+    // the spawn ring, and the ring is searched until one comes up clear.
+    const ids = cw.queryBoxes ? cw.queryBoxes(x, z, r, _footScratch) : null;
+    for (let i = 0; i < (ids ? ids.length : cw.boxes.length); i++) {
+        const b = ids ? cw.boxes[ids[i]] : cw.boxes[i];
         if (b.tag === 'bound' || b.tag === 'ground' || b.tag === 'bush' || b.tag === 'glass') continue;
         if (x + r <= b.minX || x - r >= b.maxX || z + r <= b.minZ || z - r >= b.maxZ) continue;
         if (b.minY <= 0.2 && b.maxY >= 1.2) return true;

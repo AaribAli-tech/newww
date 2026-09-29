@@ -1568,18 +1568,80 @@ function buildGround() {
 // ============================================================================
 // SKY
 // ============================================================================
+/**
+ * The cloud field, baked once into a 512² tile.
+ *
+ * This used to be twelve octaves of value noise evaluated per pixel — four sin()
+ * calls in each — over every pixel of sky in the frame, and it was the most
+ * expensive thing on screen: on a phone GPU the sky cost more than the whole town.
+ * The noise is the same value-noise fBm, in the same 32-unit tile, evaluated once
+ * at load into a texture instead. The lattice wraps at the tile edge for every
+ * octave, so the repeat has no seam, and the second sample at 2.3× (which the old
+ * shader used for the grain) is now the texture's own detail.
+ *
+ * A hash without sin(): 262k texels × 5 octaves × 4 corners of math.sin is a
+ * loading-screen freeze, and the clouds do not care which noise they are made of.
+ */
+function cloudTexture(res = 512, span = 32) {
+    const c = document.createElement('canvas');
+    c.width = c.height = res;
+    const ctx = c.getContext('2d');
+    const img = ctx.createImageData(res, res);
+    const hash = (x, y) => {
+        let h = (x * 374761393 + y * 668265263) | 0;
+        h = (h ^ (h >>> 13)) * 1274126177 | 0;
+        return ((h ^ (h >>> 16)) >>> 0) / 4294967296;
+    };
+    const at = (ix, iy, period) => {
+        const px = ((ix % period) + period) % period, py = ((iy % period) + period) % period;
+        return hash(px, py);
+    };
+    const weights = [];
+    let wsum = 0;
+    for (let o = 0, a = 0.5; o < 5; o++, a *= 0.5) { weights.push(a); wsum += a; }
+    for (let j = 0; j < res; j++) {
+        const v = (j / res) * span;
+        for (let i = 0; i < res; i++) {
+            const u = (i / res) * span;
+            let sum = 0, freq = 1;
+            for (let o = 0; o < 5; o++, freq *= 2) {
+                const x = u * freq, y = v * freq;
+                const ix = Math.floor(x), iy = Math.floor(y);
+                const fx = x - ix, fy = y - iy;
+                const sx = fx * fx * (3 - 2 * fx), sy = fy * fy * (3 - 2 * fy);
+                const period = span * freq;                 // wraps at the tile edge
+                const a00 = at(ix, iy, period), a10 = at(ix + 1, iy, period);
+                const a01 = at(ix, iy + 1, period), a11 = at(ix + 1, iy + 1, period);
+                const top = a00 + (a10 - a00) * sx, bot = a01 + (a11 - a01) * sx;
+                sum += weights[o] * (top + (bot - top) * sy);
+            }
+            const k = (j * res + i) * 4;
+            const val = sum / wsum;
+            img.data[k] = img.data[k + 1] = img.data[k + 2] = val * 255;
+            img.data[k + 3] = 255;
+        }
+    }
+    ctx.putImageData(img, 0, 0);
+    const t = new THREE.CanvasTexture(c);
+    t.wrapS = t.wrapT = THREE.RepeatWrapping;
+    t.minFilter = THREE.LinearMipmapLinearFilter;
+    t.magFilter = THREE.LinearFilter;
+    t.colorSpace = THREE.NoColorSpace;
+    return t;
+}
+
 function buildSky(scene) {
     const geo = new THREE.SphereGeometry(400, 48, 32);
     const mat = new THREE.ShaderMaterial({
         side: THREE.BackSide, depthWrite: false,
-        uniforms: { time: { value: 0 }, sunDir: { value: new THREE.Vector3(-0.42, 0.55, 0.28).normalize() } },
+        uniforms: {
+            time: { value: 0 },
+            sunDir: { value: new THREE.Vector3(-0.42, 0.55, 0.28).normalize() },
+            clouds: { value: cloudTexture() }
+        },
         vertexShader: `varying vec3 vP; void main(){ vP = position; gl_Position = projectionMatrix * modelViewMatrix * vec4(position,1.0); }`,
         fragmentShader: `
-            varying vec3 vP; uniform float time; uniform vec3 sunDir;
-            float hash(vec2 p){ return fract(sin(dot(p,vec2(127.1,311.7)))*43758.5453); }
-            float noise(vec2 p){ vec2 i=floor(p),f=fract(p); f=f*f*(3.0-2.0*f);
-                return mix(mix(hash(i),hash(i+vec2(1,0)),f.x), mix(hash(i+vec2(0,1)),hash(i+vec2(1,1)),f.x),f.y); }
-            float fbm(vec2 p){ float v=0.0,a=0.5; for(int i=0;i<6;i++){ v+=a*noise(p); p=p*2.03+vec2(1.7,9.2); a*=0.5; } return v; }
+            varying vec3 vP; uniform float time; uniform vec3 sunDir; uniform sampler2D clouds;
             void main(){
                 vec3 d = normalize(vP);
                 float h = d.y;
@@ -1593,9 +1655,11 @@ function buildSky(scene) {
                 sky += vec3(1.0,0.86,0.60) * pow(sd, 12.0) * 0.30;
                 sky += vec3(1.0,0.80,0.55) * pow(sd, 3.0) * 0.07;
                 if (h > 0.0) {
-                    vec2 uv = d.xz/(h+0.14)*1.6 + vec2(time*0.004, time*0.0016);
-                    float c = fbm(uv);
-                    float c2 = fbm(uv*2.3 + 3.1);
+                    vec2 p = d.xz/(h+0.14)*1.6 + vec2(time*0.004, time*0.0016);
+                    // one tile is 32 units of p; the old fbm(uv) and fbm(uv*2.3+3.1)
+                    // are now two samples of it, offsets in the same units.
+                    float c  = texture2D(clouds, p * (1.0/32.0)).r;
+                    float c2 = texture2D(clouds, p * (2.3/32.0) + vec2(3.1/32.0)).r;
                     float cov = smoothstep(0.44,0.78,c*0.75+c2*0.35);
                     float lit = smoothstep(0.35,0.85,c2);
                     vec3 cc = mix(vec3(0.62,0.65,0.70), vec3(1.02,1.0,0.98), lit);

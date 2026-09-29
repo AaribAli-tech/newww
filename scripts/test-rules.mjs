@@ -2105,8 +2105,18 @@ group('touch — the phone HUD and the desktop it must not disturb');
         /body\.touch #ammoCur\{font-size:34px\}/.test(css) && /body\.touch #ammoRes\{font-size:15px\}/.test(css),
         '68 px was taller than the whole column it shares with the feed and the rewards');
     ok('a short screen gives up the slot strip before it can reach the thumbs',
-        /@media \(max-height:460px\)\{\s*body\.touch #slots\{display:none\}/.test(css)
-        && /@media \(max-height:340px\)\{\s*body\.touch #killfeed\{display:none\}/.test(css));
+        /html\.vh-460 body\.touch #slots\{display:none\}/.test(css)
+        && /html\.vh-340 body\.touch #killfeed\{display:none\}/.test(css));
+    ok('and the tiers are the height the phone is showing, not the one it reports',
+        /html\.vh-560 body\.touch/.test(css) && /html\.vh-300 body\.touch/.test(css)
+        && !/@media \(max-height:\d+px\)\{/.test(css)
+        && /for \(const t of TIERS\) el\.classList\.toggle/.test(tjs)
+        && /const TIERS = \[560, 460, 420, 340, 300\]/.test(tjs),
+        'a media query measures the layout viewport; the toolbar is inside it');
+    ok('and the compact tiers are nested longest-first, so the shortest one wins',
+        [560, 460, 420, 340, 300].map(t => css.indexOf(`html.vh-${t} body.touch`))
+            .every((i, k, a) => i > 0 && (k === 0 || i > a[k - 1])),
+        'every tier at or above the measured height applies; the last one in the file wins');
     ok('the nuke bar is a block of the right-hand column, not a fifth offset',
         /<div id="hudRight">\s*<div id="nukeTrack">/.test(html)
         && /body\.touch #nukeTrack\{width:min\(200px,34vw\);margin:0\}/.test(css)
@@ -2171,13 +2181,18 @@ group('touch — the phone HUD and the desktop it must not disturb');
         /body\.touch #skipRound\{display:none\}/.test(css) && html.includes('id="tSkip"'));
 
     // 7 · the HUD compaction the short landscape screen needs.
-    ok('the killfeed stops at three lines on a phone, two on a tiny one',
+    ok('the killfeed stops at three lines on a phone, one on a short one',
         /body\.touch #killfeed \.kf:nth-child\(n\+4\)\{display:none\}/.test(css)
-        && /body\.touch #killfeed \.kf:nth-child\(n\+3\)\{display:none\}/.test(css));
-    ok('the minimap shrinks for a phone', /body\.touch #miniWrap\{[\s\S]{0,160}?width:118px;height:118px\}/.test(css));
+        && /vh-420 body\.touch #killfeed \.kf:nth-child\(n\+2\)\{display:none\}/.test(css));
+    ok('the minimap is a quarter of the picture on a phone',
+        /vh-560 body\.touch #miniWrap\{[\s\S]{0,200}?min\(118px,calc\(var\(--vhpx,100vh\) \* \.24\)\)/.test(css)
+        && /vh-300 body\.touch #miniWrap\{display:none\}/.test(css));
     ok('keyboard-only hints go quiet on a phone',
-        /body\.touch #reloadHint, body\.touch #pauseHint, body\.touch #ntHint\{display:none\}/.test(css)
-        && /body\.touch \.stk \.ky\{display:none\}/.test(css));
+        /body\.touch #reloadHint,[\s\S]{0,120}?body\.touch #ntHint\{display:none\}/.test(css)
+        && /body\.touch \.stk \.ky\{display:none\}/.test(css)
+        && /body\.touch #perfHud\{display:none\}/.test(css)
+        && /body\.touch #specHint\{display:none\}/.test(css),
+        'the perf strip and the free-roam key list were the other two keyboard readouts');
     ok('the widgets you have to press are still there to press',
         /body\.touch \.stk\{[^}]*pointer-events:auto/.test(css)
         && /#gameBtns\{position:absolute;top:14px;right:16px;display:flex;gap:6px;pointer-events:auto\}/.test(css),
@@ -2211,6 +2226,12 @@ group('touch — the phone HUD and the desktop it must not disturb');
         /export function viewportSize\(win = window\)/.test(tjs) && /visualViewport/.test(tjs)
         && /Math\.min\(win\.innerWidth/.test(tjs),
         'the smaller of the layout and the visual viewport');
+    ok('the menus and the cards are that rectangle too, not the layout viewport',
+        /body\.touch #loader, body\.touch #menu, body\.touch #diffGate, body\.touch #panel,/.test(css)
+        && /body\.touch #pause, body\.touch #end, body\.touch #death, body\.touch #board,/.test(css)
+        && /body\.touch #rotate, body\.touch #scope, body\.touch #dmgDirs, body\.touch #damageVig,/.test(css)
+        && !/#menu,#panel,#pause,#end,#diffGate,#board,#loader\{min-height:100dvh\}/.test(css),
+        'a card centred in the layout viewport is centred under the toolbar');
     ok('and published, so every full-screen layer is the same rectangle',
         /export function applyViewportVars\(h\)/.test(tjs) && /setProperty\('--vhpx'/.test(tjs)
         && /height:var\(--vhpx,100vh\);bottom:auto/.test(css)

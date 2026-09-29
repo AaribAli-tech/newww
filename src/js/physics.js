@@ -173,46 +173,74 @@ export class CollisionWorld {
      * @returns {null | {distance, point, normal}}
      */
     raycast(origin, dir, maxDist = 200, skipTags = null) {
-        // walk the ray's XZ footprint through the grid cells it touches
-        const scratch = this._rayScratch || (this._rayScratch = []);
-        const ex = origin.x + dir.x * maxDist, ez = origin.z + dir.z * maxDist;
-        const ids = this._query(
-            Math.min(origin.x, ex) - 0.5, Math.min(origin.z, ez) - 0.5,
-            Math.max(origin.x, ex) + 0.5, Math.max(origin.z, ez) + 0.5, scratch
-        );
-
-        let bestT = maxDist, hit = null;
+        const boxes = this.boxes, grid = this.grid, stamps = this._stamps;
+        const stamp = ++this._queryStamp;
         const invX = 1 / (dir.x || 1e-9), invY = 1 / (dir.y || 1e-9), invZ = 1 / (dir.z || 1e-9);
 
-        for (let i = 0; i < ids.length; i++) {
-            const b = this.boxes[ids[i]];
-            if (skipTags && skipTags.has(b.tag)) continue;
-            let t1 = (b.minX - origin.x) * invX, t2 = (b.maxX - origin.x) * invX;
-            let tmin = Math.min(t1, t2), tmax = Math.max(t1, t2);
-            let axis = 0;
-            t1 = (b.minY - origin.y) * invY; t2 = (b.maxY - origin.y) * invY;
-            const ymin = Math.min(t1, t2), ymax = Math.max(t1, t2);
-            if (ymin > tmin) { tmin = ymin; axis = 1; }
-            tmax = Math.min(tmax, ymax);
-            t1 = (b.minZ - origin.z) * invZ; t2 = (b.maxZ - origin.z) * invZ;
-            const zmin = Math.min(t1, t2), zmax = Math.max(t1, t2);
-            if (zmin > tmin) { tmin = zmin; axis = 2; }
-            tmax = Math.min(tmax, zmax);
+        let bestT = maxDist, hitId = -1, hitAxis = 0;
+        let cx = Math.floor(origin.x / CELL), cz = Math.floor(origin.z / CELL);
+        const stepX = dir.x > 0 ? 1 : -1, stepZ = dir.z > 0 ? 1 : -1;
+        const tDeltaX = Math.abs(CELL * invX), tDeltaZ = Math.abs(CELL * invZ);
+        let tMaxX = (dir.x > 0 ? (cx + 1) * CELL - origin.x : origin.x - cx * CELL) * Math.abs(invX);
+        let tMaxZ = (dir.z > 0 ? (cz + 1) * CELL - origin.z : origin.z - cz * CELL) * Math.abs(invZ);
+        const endX = Math.floor((origin.x + dir.x * maxDist) / CELL);
+        const endZ = Math.floor((origin.z + dir.z * maxDist) / CELL);
 
-            if (tmax < Math.max(tmin, 0) || tmin > bestT || tmin < 0) continue;
-            bestT = tmin;
-            hit = { t: tmin, axis, box: b };
+        // Walk the grid cells the ray passes through rather than the whole
+        // rectangle between its ends. A 100 m sightline used to hand the slab test
+        // every box in a 17×17-cell box (hundreds of them, most of them nowhere
+        // near the line); it now tests the few boxes in the ~20 cells along it, and
+        // stops early once the closest hit is nearer than the next cell's edge.
+        for (let guard = 0; guard < 4096; guard++) {
+            const arr = grid.get(cx * 10007 + cz);
+            if (arr) {
+                for (let i = 0; i < arr.length; i++) {
+                    const id = arr[i];
+                    if (stamps[id] === stamp) continue;
+                    stamps[id] = stamp;
+                    const b = boxes[id];
+                    if (skipTags && skipTags.has(b.tag)) continue;
+                    let t1 = (b.minX - origin.x) * invX, t2 = (b.maxX - origin.x) * invX;
+                    let tmin = t1 < t2 ? t1 : t2, tmax = t1 < t2 ? t2 : t1;
+                    let axis = 0;
+                    t1 = (b.minY - origin.y) * invY; t2 = (b.maxY - origin.y) * invY;
+                    const ymin = t1 < t2 ? t1 : t2, ymax = t1 < t2 ? t2 : t1;
+                    if (ymin > tmin) { tmin = ymin; axis = 1; }
+                    if (ymax < tmax) tmax = ymax;
+                    t1 = (b.minZ - origin.z) * invZ; t2 = (b.maxZ - origin.z) * invZ;
+                    const zmin = t1 < t2 ? t1 : t2, zmax = t1 < t2 ? t2 : t1;
+                    if (zmin > tmin) { tmin = zmin; axis = 2; }
+                    if (zmax < tmax) tmax = zmax;
+
+                    if (tmax < Math.max(tmin, 0) || tmin > bestT || tmin < 0) continue;
+                    bestT = tmin; hitId = id; hitAxis = axis;
+                }
+            }
+            const tNext = tMaxX < tMaxZ ? tMaxX : tMaxZ;
+            if (bestT <= tNext || tNext > maxDist) break;      // nothing closer is left
+            if (cx === endX && cz === endZ) break;             // the last cell it touches
+            if (tMaxX < tMaxZ) { cx += stepX; tMaxX += tDeltaX; }
+            else { cz += stepZ; tMaxZ += tDeltaZ; }
         }
 
-        if (!hit) return null;
+        if (hitId < 0) return null;
         const point = new THREE.Vector3(
-            origin.x + dir.x * hit.t, origin.y + dir.y * hit.t, origin.z + dir.z * hit.t
+            origin.x + dir.x * bestT, origin.y + dir.y * bestT, origin.z + dir.z * bestT
         );
         const normal = new THREE.Vector3();
-        if (hit.axis === 0) normal.x = dir.x > 0 ? -1 : 1;
-        else if (hit.axis === 1) normal.y = dir.y > 0 ? -1 : 1;
+        if (hitAxis === 0) normal.x = dir.x > 0 ? -1 : 1;
+        else if (hitAxis === 1) normal.y = dir.y > 0 ? -1 : 1;
         else normal.z = dir.z > 0 ? -1 : 1;
-        return { distance: hit.t, point, normal, tag: hit.box.tag };
+        return { distance: bestT, point, normal, tag: boxes[hitId].tag };
+    }
+
+    /**
+     * Box indices overlapping an XZ rectangle, from the broadphase. Exposed for the
+     * callers that need to sweep a small area rather than follow a ray — spawn
+     * placement was walking all `boxes` by hand, once per candidate spot.
+     */
+    queryBoxes(x, z, radius, out = []) {
+        return this._query(x - radius, z - radius, x + radius, z + radius, out);
     }
 
     isLineOfSight(from, to, skipTags = SOFT_COVER) {

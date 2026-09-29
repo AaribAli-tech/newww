@@ -36,6 +36,10 @@ export const IS_TOUCH = (() => {
     return !!(window.matchMedia && window.matchMedia('(hover: none) and (pointer: coarse)').matches);
 })();
 
+// The visible heights the stylesheet has a layout for, longest first; every tier at
+// or above the measured height is applied and the shortest one that fits wins.
+const TIERS = [560, 460, 420, 340, 300];
+
 const $ = id => document.getElementById(id);
 const clamp = (v, a, b) => (v < a ? a : v > b ? b : v);
 
@@ -68,9 +72,25 @@ export function viewportSize(win = window) {
  * screen. Called from main.js's resize path, which is where the measurement lives.
  */
 export function applyViewportVars(h) {
-    try { document.documentElement.style.setProperty('--vhpx', `${Math.round(h)}px`); }
-    catch { /* no DOM (node tests) */ }
+    try {
+        const el = document.documentElement;
+        el.style.setProperty('--vhpx', `${Math.round(h)}px`);
+        // …and the compact tiers. The stylesheet's short-screen rules used to be
+        // `@media (max-height:NNNpx)`, and a media query measures the *layout*
+        // viewport — the size the phone reports, toolbar included. A phone reporting
+        // 320 px while its chrome covers 46 of them got the tall layout inside the
+        // short picture, and the readout columns, whose boxes are pinned above the
+        // thumb grid, ran off the bottom. The tier is the height the phone is
+        // actually showing, which only this measurement knows.
+        for (const t of TIERS) el.classList.toggle(`vh-${t}`, h <= t);
+    } catch { /* no DOM (node tests) */ }
 }
+
+// Published here, at module load, as well as from main.js's resize path: the first
+// thing a phone paints is the loader, and then the menu — both full-screen layers
+// sized by this variable — and the renderer is not up yet when they are drawn. This
+// is what makes the first paint already the rectangle the phone is showing.
+if (IS_TOUCH) { try { applyViewportVars(viewportSize().h); } catch { /* no window */ } }
 
 // Stick geometry, in CSS pixels of the base radius; the CSS sizes the base and
 // reads these back, so changing the look is a one-line change in index.html.

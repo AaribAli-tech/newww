@@ -32,6 +32,22 @@ if (!cssFile) {
 }
 const css = await readFile(path.join(PUB, 'css', cssFile), 'utf8');
 
+/**
+ * A selector's specificity as one number: ids beat classes, classes beat element
+ * names. It matters because the stylesheet is no longer written so that file order
+ * alone decides — the compact tiers are `html.vh-400 body.touch #x`, which is one
+ * class and one element more specific than the `body.touch #x` they replaced, so a
+ * rule written *later* can now lose to one written earlier. The model has to count
+ * the same way the browser does or it reports a layout that is not the one on screen.
+ */
+function spec(sel) {
+    if (!sel) return 0;
+    const ids = (sel.match(/#[\w-]+/g) || []).length;
+    const cls = (sel.match(/\.[\w-]+|\[[^\]]*\]|::?[\w-]+(?:\([^)]*\))?/g) || []).length;
+    const typ = (sel.match(/(?:^|[\s>+~])[a-z][\w-]*/g) || []).length;
+    return ids * 1e6 + (cls - ids > 0 ? cls - ids : cls) * 1e3 + typ;
+}
+
 // ── the devices from the brief, all landscape ────────────────────────────────
 const DEVICES = [
     { name: '360×640 phone', w: 640, h: 360 },
@@ -49,9 +65,14 @@ const DEVICES = [
 // bottom, so the sides and the bottom are what a phone actually loses.
 const NOTCH = { l: 47, r: 47, t: 0, b: 21 };
 const FLAT = { l: 0, r: 0, t: 0, b: 0 };
+// How much of the layout viewport a phone in a browser hands to its own chrome in
+// landscape: the URL bar on top, the toolbar/home bar under it. A full-screen layer
+// on `inset:0` is the layout viewport — all of it — so on a phone this is exactly
+// the band the bottom of a menu card, and a scoped crosshair, disappear into.
+const CHROME = 46;
 
 /** The winning declarations per (selector, property), plus the custom properties. */
-function collect(W, H) {
+function collect(W, H, visH = H) {
     const props = new Map(), vars = new Map();
     let ord = 0;
     const stack = [];
@@ -73,10 +94,36 @@ function collect(W, H) {
         const prop = decl.slice(0, c).trim(), val = decl.slice(c + 1).trim();
         if (!prop || !val) return;
         if (prop.startsWith('--')) { vars.set(prop, val); return; }
+        // `inset:0` is how every full-screen layer is anchored, and the size model
+        // below reads longhands — expand the shorthand here or the layers look like
+        // boxes with no edges.
+        if (prop === 'inset') {
+            const parts = val.split(/\s+/);
+            const t = parts[0], r = parts[1] ?? t, b = parts[2] ?? t, l = parts[3] ?? r;
+            for (const [k, v] of [['top', t], ['right', r], ['bottom', b], ['left', l]]) {
+                ord++;
+                for (const sel of sels()) {
+                    if (!sel) continue;
+                    for (const one of sel.split(',')) props.set(`${one.trim()}|${k}`, { val: v, ord });
+                }
+            }
+            return;
+        }
         ord++;
         for (const sel of sels()) {
             if (!sel) continue;
-            for (const one of sel.split(',')) props.set(`${one.trim()}|${prop}`, { val, ord });
+            for (const raw of sel.split(',')) {
+                const one = raw.trim();
+                // `html.vh-300 body.touch #x` — the compact tiers. touch.js sets every
+                // tier at or above the measured height, so only those are live, and the
+                // selector is recorded without the prefix, exactly as if the block had
+                // been the media query it replaced.
+                const m = /^html\.vh-(\d+)\s+([\s\S]+)$/.exec(one);
+                if (m) {
+                    if (visH > +m[1]) continue;
+                    props.set(`${m[2].trim()}|${prop}`, { val, ord, s: spec(one) });
+                } else props.set(`${one}|${prop}`, { val, ord, s: spec(one) });
+            }
         }
     };
     while (i < css.length) {
@@ -131,7 +178,8 @@ function collect(W, H) {
         let best = null;
         for (const sel of sels) {
             const e = props.get(`${sel}|${prop}`);
-            if (e && (!best || e.ord > best.ord)) best = e;
+            // The cascade: specificity first, file order between equals.
+            if (e && (!best || e.s > best.s || (e.s === best.s && e.ord > best.ord))) best = e;
         }
         return best ? num(best.val, axis, at) : NaN;
     }
@@ -144,14 +192,15 @@ function collect(W, H) {
  * is how the buttons find their size; an element with left+right and no width is
  * sized by the gap between them.
  */
-function rectOf(C, id, W, H, at, classes = [], size = null) {
+function rectOf(C, id, W, H, at, classes = [], size = null, extra = []) {
     // #id, `body.touch #id`, then whatever the shared class rule says — the same
     // reach a browser would give this element, resolved in file order.
     // The element's own id, the body.touch and #touchUI forms of it, and the class
     // it actually carries — never a class it does not have, or the invisible pads'
     // `top:0;bottom:0` would stretch every button to the height of the screen.
     const reach = [`#${id}`, `body.touch #${id}`, `#touchUI #${id}`,
-        ...classes, ...classes.map(c => `body.touch ${c}`), ...classes.map(c => `#touchUI ${c}`)];
+        ...classes, ...classes.map(c => `body.touch ${c}`), ...classes.map(c => `#touchUI ${c}`),
+        ...extra];
     const own = (prop, axis) => C.pick(reach, prop, axis, at);
     const w = own('width', 'h'), h = own('height', 'v');
     const l = own('left', 'h'), r = own('right', 'h');
@@ -185,26 +234,64 @@ const CL = Object.fromEntries(WIDGETS.map(id => [id,
 // The right-hand readouts are modelled as one column below; these three are the
 // left-hand corners, placed by their own rules and measured where they land.
 
-let worstGap = Infinity, worstPair = '', maxCover = 0, minSize = Infinity, highest = 0;
+let worstGap = Infinity, worstPair = '', maxCover = 0, minSize = Infinity, highest = 0, maxPaint = 0;
 const seen = {};
+// Four shapes per device. The stylesheet branches on the *layout* height — media
+// queries and vh units are the layout viewport — while every layer is sized to the
+// *visual* viewport, which is the part the browser's own chrome is not covering.
+// Modelling both is the only way to catch a card that fits the layout rectangle and
+// still hangs off the screen the player is looking at.
+const SHAPES = [
+    { tag: '', chrome: 0, notch: FLAT },
+    { tag: ' notched', chrome: 0, notch: NOTCH },
+    { tag: ' + chrome', chrome: CHROME, notch: FLAT },
+    { tag: ' notched + chrome', chrome: CHROME, notch: NOTCH }
+];
 for (const dev of DEVICES) {
     group(`${dev.name} (${dev.w}×${dev.h} landscape)`);
-    for (const [notchName, baseAt] of [['', FLAT], ['notched', NOTCH]]) {
+    for (const shape of SHAPES) {
+        const visH = dev.h - shape.chrome;
         // A home bar comes with a notch, and every notched phone is at least 375 px
         // tall in landscape; a 320-px screen has a side inset or none. Modelling the
         // two together would test a device that does not exist.
-        const at = notchName && dev.h <= 340 ? { l: 47, r: 47, t: 0, b: 0 } : baseAt;
-        const C = collect(dev.w, dev.h);
+        const at = shape.notch.l && dev.h <= 340 ? { l: 47, r: 47, t: 0, b: 0 } : shape.notch;
+        const C = collect(dev.w, dev.h, visH);
+        C.vars.set('--vhpx', `${visH}px`);        // what applyViewportVars() publishes
+        // Which compact tier the stylesheet is in: the shortest one the visible height
+        // fits, not the one the layout viewport claims.
+        const TIER = [300, 340, 420, 460, 560].find(t => visH <= t) ?? 9999;
         const R = {};
-        for (const id of WIDGETS) R[id] = rectOf(C, id, dev.w, dev.h, at, CL[id]);
-        const tag = notchName ? `${notchName} ${dev.name}` : dev.name;
+        for (const id of WIDGETS) R[id] = rectOf(C, id, dev.w, visH, at, CL[id]);
+        const tag = `${dev.name}${shape.tag}`;
 
         const missing = WIDGETS.filter(id => !R[id]);
         ok(`${tag}: every control is sized by the stylesheet`, missing.length === 0, missing.join(' '));
 
         const off = FIXED.concat(ROAM).filter(id => R[id]
-            && (R[id].x < -0.5 || R[id].y < -0.5 || R[id].x + R[id].w > dev.w + 0.5 || R[id].y + R[id].h > dev.h + 0.5));
+            && (R[id].x < -0.5 || R[id].y < -0.5 || R[id].x + R[id].w > dev.w + 0.5 || R[id].y + R[id].h > visH + 0.5));
         ok(`${tag}: every control sits inside the screen`, off.length === 0, off.join(' '));
+
+        // Every full-screen layer — the canvas, the HUD, the pads, and every menu,
+        // card and full-screen effect — has to be the rectangle the phone is showing,
+        // anchored at the top with an explicit height. A layer left on `inset:0` is the
+        // layout viewport, which is taller than the picture whenever the browser is
+        // showing its chrome: a card centred in it drifts down under the toolbar, and
+        // the scope's glass and crosshair drift off the point being aimed at with it.
+        const LAYERS = ['gameCanvas', 'hud', 'touchUI', 'touchPads', 'loader', 'menu',
+            'diffGate', 'panel', 'pause', 'end', 'death', 'board', 'rotate', 'scope',
+            'dmgDirs', 'damageVig', 'lowHp', 'screenFlash', 'nukeSeq', 'nukeBars'];
+        const offLayer = [];
+        for (const id of LAYERS) {
+            const extra = id === 'gameCanvas' ? ['canvas#gameCanvas']
+                : (id === 'pause' || id === 'end' || id === 'death') ? ['.overlay'] : [];
+            const r = rectOf(C, id, dev.w, visH, at, [], null, extra);
+            if (!r) { offLayer.push(`${id}: no box`); continue; }
+            if (Math.abs(r.x) > 0.5 || Math.abs(r.y) > 0.5
+                || Math.abs(r.w - dev.w) > 0.5 || Math.abs(r.h - visH) > 0.5)
+                offLayer.push(`${id} ${Math.round(r.w)}×${Math.round(r.h)}`);
+        }
+        ok(`${tag}: every full-screen layer is the rectangle the phone is showing`,
+            offLayer.length === 0, offLayer.join(' '));
 
         const clash = [];
         const live = ROAM.includes('tUp') ? FIXED : FIXED;   // playing: the roam trio is hidden
@@ -230,8 +317,15 @@ for (const dev of DEVICES) {
         // The view itself: a box in the middle of the screen that no widget may enter.
         // Measured inside the safe area — behind a notch and under a home bar there is
         // no picture at all, so a button reaching in there is not covering the view.
-        const useW = Math.max(1, dev.w - at.l - at.r), useH = Math.max(1, dev.h - at.t - at.b);
-        const centre = { x: at.l + useW * 0.33, y: at.t + useH * 0.33, w: useW * 0.34, h: useH * 0.34 };
+        const useW = Math.max(1, dev.w - at.l - at.r), useH = Math.max(1, visH - at.t - at.b);
+        // The box is the middle of the *view*: the picture without the two thumb rows at
+        // its foot. On a short screen the cluster is physically in the lower middle third —
+        // the player's own fingers are there — and measuring that as "the HUD covers the
+        // view" would be measuring the geometry of a small screen, not a bug.
+        const thumbBand = (C.vars.get('--gap') ? C.num(C.vars.get('--gap'), 'v', at) : 10)
+            + (C.vars.get('--fire') ? C.num(C.vars.get('--fire'), 'v', at) : 60) * 2;
+        const viewH = Math.max(1, useH - thumbBand);
+        const centre = { x: at.l + useW * 0.33, y: at.t + viewH * 0.33, w: useW * 0.34, h: viewH * 0.34 };
         let covered = 0;
         for (const id of WIDGETS) {
             // The two pads are invisible; the stick appears under the thumb and is
@@ -240,13 +334,20 @@ for (const dev of DEVICES) {
             const o = isect(centre, R[id]);
             covered += area(o);
         }
+        // The other half of that question: how much of the picture the controls paint
+        // at all. The thumb grid is where it should be, and a bound on its share is a
+        // bound on a HUD that has grown into the thing it is drawn over.
+        const paint = BTN.concat(['tBoard', 'tFull'])
+            .reduce((sum, id) => sum + (R[id] ? area(R[id]) : 0), 0) / (dev.w * visH) * 100;
+        maxPaint = Math.max(maxPaint, paint);
+
         const pct = covered / area(centre) * 100;
         maxCover = Math.max(maxCover, pct);
         ok(`${tag}: the middle of the view stays clear`, pct < 1, `${pct.toFixed(2)}% covered`);
 
-        if (!notchName) {
+        if (!shape.tag) {
             for (const id of BTN) if (R[id]) minSize = Math.min(minSize, Math.min(R[id].w, R[id].h));
-            if (R.tJump) highest = Math.max(highest, (dev.h - R.tJump.y) / dev.h * 100);
+            if (R.tJump) highest = Math.max(highest, (visH - R.tJump.y) / visH * 100);
             seen[dev.name] = R;
         }
 
@@ -270,32 +371,39 @@ for (const dev of DEVICES) {
         const boxTop = C.get('body.touch #hudRight', 'top', 'v', at);
         const boxBottom = C.get('body.touch #hudRight', 'bottom', 'v', at);
         const boxRight = C.get('body.touch #hudRight', 'right', 'h', at);
-        const feedLines = dev.h <= 340 ? 0 : dev.h <= 420 ? 2 : 3;
+        const feedLines = TIER <= 340 ? 0 : TIER <= 420 ? 1 : 3;
+        const colGap = TIER <= 420 ? 3 : 4;         // the wrapper's own gap
         const BLOCKS = [
-            ['nukeTrack', C.get('body.touch #nukeTrack', 'width', 'h', at) || 200, 20],
+            ['nukeTrack', C.get('body.touch #nukeTrack', 'width', 'h', at) || 200, TIER <= 300 ? 0 : 20],
             ['killfeed', C.get('body.touch #killfeed', 'width', 'h', at) || 180,
                 feedLines ? feedLines * 15 + 2 : 0],
-            ['brWrap', 116, 52],                        // 34 px counter, weapon row, strip
-            ['slots', 113, dev.h <= 460 ? 0 : 22],      // given up on a short screen
-            ['streakCol', 140, 28]                      // three 44×28 tiles and their gaps
+            ['brWrap', 116, TIER <= 300 ? 40 : TIER <= 420 ? 48 : 52],
+            ['slots', 113, TIER <= 460 ? 0 : 22],       // given up on a short screen
+            ['streakCol', TIER <= 300 ? 116 : TIER <= 420 ? 122 : 140,
+                TIER <= 300 ? 20 : TIER <= 420 ? 24 : 28]
         ];
         const colW = Math.max(...BLOCKS.filter(b => b[2] > 0).map(b => b[1]));
-        const boxH = dev.h - boxBottom - boxTop;
+        const boxH = visH - boxBottom - boxTop;
         const box = { x: dev.w - boxRight - colW, y: boxTop, w: colW, h: boxH };
         const hr = {};
         let colEnd = boxTop;
         for (const [id, w, h] of BLOCKS) {
             if (h <= 0) continue;
             hr[id] = { x: box.x + colW - w, y: colEnd, w, h };
-            colEnd += h + 4;                            // the wrapper's 4 px gap
+            colEnd += h + colGap;
         }
         // The mute and pause chips: 38 px on a phone (`body.touch .gbtn`), in from the
         // safe area by the same 16 px the column uses.
         hr.gameBtns = { x: dev.w - at.r - 16 - 82, y: gridGap + at.t, w: 82, h: 38 };
-        const MISSING = dev.h <= 340 ? ['killfeed', 'slots'] : dev.h <= 460 ? ['slots'] : [];
+        const MISSING = TIER <= 300 ? ['nukeTrack', 'killfeed', 'slots']
+            : TIER <= 340 ? ['killfeed', 'slots'] : TIER <= 460 ? ['slots'] : [];
+        // The column always carries the ammo block and the reward tiles; the blocks it
+        // gives up on a short screen are the ones in MISSING, and they must be gone.
+        const expected = ['nukeTrack', 'killfeed', 'slots'].filter(id => !MISSING.includes(id));
         ok(`${tag}: the readout column is laid out`,
             Number.isFinite(boxTop) && Number.isFinite(boxBottom) && Number.isFinite(gridGap)
-            && !!hr.nukeTrack && !!hr.brWrap && !!hr.streakCol && MISSING.every(id => !hr[id]),
+            && !!hr.brWrap && !!hr.streakCol && expected.every(id => !!hr[id])
+            && MISSING.every(id => !hr[id]),
             `box ${Math.round(boxTop)}..${Math.round(boxTop + boxH)}`);
         const stacked = [];
         let prev = null;
@@ -328,18 +436,26 @@ for (const dev of DEVICES) {
         const leftH = C.get('body.touch #hudLeft', 'height', 'v', at);
         const leftLeft = C.get('body.touch #hudLeft', 'left', 'h', at);
         // The steps the stylesheet takes them through, short screen first.
-        const mmSize = dev.h <= 340 ? 84 : dev.h <= 460 ? 96 : dev.h <= 560 ? 118 : 200;
-        const scSize = dev.h <= 340 ? 14 : dev.h <= 460 ? 16 : dev.h <= 560 ? 18 : 23;
-        const clockSize = dev.h <= 340 ? 14 : dev.h <= 560 ? 16 : 25;
+        // The map is a quarter of the picture (capped at 118) whenever a tier applies, and
+        // gone entirely on the shortest one: `min(118px, calc(var(--vhpx) * .24))` in CSS.
+        const mmSize = TIER <= 300 ? 0 : TIER <= 560 ? Math.min(118, visH * 0.24) : 200;
+        const scSize = TIER <= 300 ? 12 : TIER <= 340 ? 14 : TIER <= 460 ? 16 : TIER <= 560 ? 18 : 23;
+        const clockSize = TIER <= 300 ? 12 : TIER <= 340 ? 14 : TIER <= 560 ? 16 : 25;
+        // Rows the score block gives up as the picture shortens: the round pips below
+        // 420, the clock below 340 (the scoreboard chip still carries both).
         const LB = [
             ['miniWrap', mmSize],
-            ['matchBar', scSize + 4 + (dev.h <= 340 ? 0 : 12) + 4 + clockSize]
+            ['matchBar', scSize + 4 + (TIER <= 420 ? 0 : 12) + (TIER <= 340 ? 0 : 4 + clockSize)]
         ];
         const lbox = { x: leftLeft, y: leftTop, w: mmSize, h: leftH };
         const lGap = C.get('body.touch #hudLeft', 'gap', 'v', at) || gridGap;
         const lr = {};
         let lEnd = leftTop;
-        for (const [id, h] of LB) { lr[id] = { x: lbox.x, y: lEnd, w: mmSize, h }; lEnd += h + lGap; }
+        for (const [id, h] of LB) {
+            if (h <= 0) continue;                    // given up on this tier
+            lr[id] = { x: lbox.x, y: lEnd, w: mmSize, h };
+            lEnd += h + lGap;
+        }
         ok(`${tag}: the left-hand column is laid out`,
             Number.isFinite(leftTop) && Number.isFinite(leftH) && Number.isFinite(leftLeft)
             && lEnd - lGap <= leftTop + leftH + 0.5,
@@ -355,10 +471,10 @@ for (const dev of DEVICES) {
         // The health readout is the one HUD block that is not in either column: it
         // keeps the bottom-left corner, above the stick's resting place and below the
         // trigger.
-        const hp = rectOf(C, 'healthWrap', dev.w, dev.h, at, [], [104, 30]);
+        const hp = rectOf(C, 'healthWrap', dev.w, visH, at, [], [104, 30]);
         ok(`${tag}: the health readout stays clear of the thumb buttons`,
-            !!hp && FIXED.every(id => !R[id] || !hit(R[id], hp, -4)) && hp.y + hp.h <= dev.h,
-            hp ? `hp ${Math.round(hp.y)}..${Math.round(hp.y + hp.h)} of ${dev.h}` : 'no rect');
+            !!hp && FIXED.every(id => !R[id] || !hit(R[id], hp, -4)) && hp.y + hp.h <= visH,
+            hp ? `hp ${Math.round(hp.y)}..${Math.round(hp.y + hp.h)} of ${visH}` : 'no rect');
     }
 }
 
@@ -387,6 +503,8 @@ group('the numbers the brief asked for');
         `tightest ${worstGap.toFixed(1)} px (${worstPair})`);
     ok('the controls never cover a tenth of the middle of the view', maxCover < 10,
         `worst ${maxCover.toFixed(2)}%`);
+    ok('and they leave the picture alone outside the thumb corners', maxPaint < 12,
+        `worst ${maxPaint.toFixed(1)}% of the visible screen painted by the controls`);
     ok('no control climbs over the horizon', highest < 45, `highest ${highest.toFixed(1)}% from the bottom`);
     ok('the top-centre buttons do not fight the scoreboard', (() => {
         for (const k of Object.keys(seen)) {

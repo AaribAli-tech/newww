@@ -4,6 +4,7 @@
 // Also owns the main-menu mode picker, since that is pure DOM work.
 // ============================================================================
 import { MINIMAP, MAP_BOUNDS } from './map.js';
+import { IS_TOUCH } from './touch.js';
 import { STREAKS } from './killstreaks.js';
 import { WEAPON_DEFS } from './weapons.js';
 
@@ -147,6 +148,7 @@ export class HUD {
             nukeSeq: $('nukeSeq'), nukeCount: $('nukeCount')
         };
         this.mctx = this.el.mini ? this.el.mini.getContext('2d') : null;
+        this._miniT = 1;            // draw the map on the first frame, then see below
 
         // nuke tracker segments
         this.segs = [];
@@ -442,7 +444,21 @@ export class HUD {
             }
         }
 
-        this._minimap(player, bots, !!(s.killstreaks && s.killstreaks.revealing));
+        // The minimap is a 400×400 canvas: cleared, clipped, and the cul-de-sac's
+        // whole shape redrawn — a circle, a road, every house, fence and vehicle,
+        // then the blips. Sixty times a second that is 160k pixels and a hundred
+        // path ops per frame, for a 118 px disc on a phone, and a canvas repaint is
+        // a texture upload as well. Twenty hertz on a phone is past what an eye
+        // reads off a minimap; a desktop keeps the frame it always had.
+        if (IS_TOUCH) {
+            this._miniT += dt;
+            if (this._miniT >= 1 / 20) {
+                this._miniT = 0;
+                this._minimap(player, bots, !!(s.killstreaks && s.killstreaks.revealing));
+            }
+        } else {
+            this._minimap(player, bots, !!(s.killstreaks && s.killstreaks.revealing));
+        }
 
         // timers
         if (this.hmTimer > 0) {
