@@ -617,5 +617,56 @@ group('the desktop path');
     ok('C still toggles crouch', player.isCrouching === true);
 }
 
+
+// ── 10 · the phone leaving ─────────────────────────────────────────────────
+// Nothing else pauses a touch match: the pointer-lock handler that pauses a
+// desktop never runs, because a phone never takes a lock. So the layer pauses it
+// when the page stops being the page the player is looking at, and asks the screen
+// to stay awake while they play — a phone that dims is a phone you cannot see.
+{
+    const docListeners = new Map();
+    globalThis.document.addEventListener = (t, f) => {
+        if (!docListeners.has(t)) docListeners.set(t, []);
+        docListeners.get(t).push(f);
+    };
+    const locks = { asked: 0, freed: 0 };
+    Object.defineProperty(globalThis, 'navigator', {
+        value: {
+            vibrate: () => true,
+            wakeLock: {
+                request: async () => {
+                    locks.asked++;
+                    return { addEventListener() { }, release: async () => { locks.freed++; } };
+                }
+            }
+        },
+        configurable: true
+    });
+    const tick = () => new Promise(r => setTimeout(r, 0));
+    let live = true, paused = null;
+    const ctl = initTouch({ ...hooks, visible: () => live, pause: on => { paused = on; } });
+    ok('a second layer can be built for the leaving test', !!ctl);
+    ctl.frame();
+    await tick();
+    ok('a live match asks the screen to stay awake', locks.asked === 1 && locks.freed === 0,
+        `${locks.asked} asked, ${locks.freed} freed`);
+
+    globalThis.document.hidden = true;
+    for (const f of (docListeners.get('visibilitychange') || [])) f({});
+    await tick();
+    ok('hiding the page pauses the match', paused === true);
+    ok('and hands the wake lock back', locks.freed === 1, `${locks.freed} freed`);
+
+    live = false; ctl.frame();
+    live = true; ctl.frame();
+    await tick();
+    ok('tapping back into live play takes the lock again', locks.asked === 2, `${locks.asked} asked`);
+
+    globalThis.document.hidden = false;
+    for (const f of (winListeners.get('pagehide') || [])) f({});
+    await tick();
+    ok('pagehide is the other way out, and it is a pause too', paused === true && locks.freed === 2);
+}
+
 console.log(`\n${fail === 0 ? '✓' : '✗'} ${pass} passed, ${fail} failed   (touch, no browser needed)\n`);
 process.exit(fail === 0 ? 0 : 1);

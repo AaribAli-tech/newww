@@ -662,7 +662,10 @@ function finishBoot() {
         canSkip: () => { const b = $('skipRound'); return !!(b && b.classList.contains('on')); },
         skip: skipRoundNow,
         nextPlayer: dir => cycleFocus(dir),
-        scoreboard: on => { boardOpen = !!on; }
+        scoreboard: on => { boardOpen = !!on; },
+        // The touch layer pauses the match itself when the page stops being the one
+        // the player is looking at, and keeps the screen awake while it is.
+        pause: on => pause(on)
     });
     if (touchCtl) document.body.classList.add('touch');
     state = 'menu';

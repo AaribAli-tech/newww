@@ -2145,6 +2145,18 @@ group('touch — the phone HUD and the desktop it must not disturb');
     ok('every control releases on pointercancel too',
         (tjs.match(/pointercancel/g) || []).length >= 4 && /lostpointercapture/.test(tjs));
 
+    // 4b · a phone is not a desktop: nothing else pauses the match for it, and
+    // nothing else keeps its screen on.
+    ok('the match pauses when the phone leaves the page',
+        /addEventListener\('visibilitychange'/.test(tjs) && /'pagehide'/.test(tjs)
+        && /if \(document\.hidden\) leaving\(\)/.test(tjs) && /hooks\.pause/.test(tjs)
+        && /pause: on => pause\(on\)/.test(mjs),
+        'a touch player has no pointer lock to lose, so nothing else fires');
+    ok('and the screen is asked to stay awake while the controls are up',
+        /navigator\.wakeLock\.request\('screen'\)/.test(tjs)
+        && /wake\(on\)/.test(tjs) && /await lock\.release\(\)/.test(tjs),
+        'a phone that dims cannot be played');
+
     // 5 · main.js: how the layer is mounted, and what a phone is spared.
     ok('the mobile-only lock-out is gone from the source, not hidden in CSS',
         !/blockMobile|NOT_ON_MOBILE|notMobile/.test(html + tjs + pjs + mjs));

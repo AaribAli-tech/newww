@@ -371,6 +371,44 @@ export function initTouch(hooks) {
     const sizeVar = v => root.style.setProperty('--tsize', String(v));
     const opacityVar = v => root.style.setProperty('--topaque', String(v));
 
+    // ── the phone leaving, and the screen while it stays ────────────────────
+    // A desktop player who tabs away loses the pointer lock, and the pointer-lock
+    // handler pauses the match on that. A touch player has no lock to lose, so a
+    // phone call, a swipe back to the home screen or a look at another tab left the
+    // round running with nobody at the controls — a death with no chance to dodge
+    // it. Coming back leaves the match paused; the pause card is the way in, which
+    // is also the only way a player gets to choose.
+    //
+    // While the controls are up the screen is asked to stay awake. A phone dims and
+    // then sleeps on its own schedule, and a phone that has dimmed is a phone you
+    // cannot see the game on. Both are best-effort: no lock API, or a browser that
+    // says no, changes nothing.
+    let wakeLock = null;
+    const wake = async on => {
+        try {
+            if (on) {
+                if (!wakeLock && navigator.wakeLock) {
+                    wakeLock = await navigator.wakeLock.request('screen');
+                    // The browser drops the lock whenever the page hides; forget the
+                    // handle so the next live frame asks for it again.
+                    wakeLock.addEventListener('release', () => { wakeLock = null; });
+                }
+            } else if (wakeLock) {
+                const lock = wakeLock;
+                wakeLock = null;
+                await lock.release();
+            }
+        } catch { wakeLock = null; }
+    };
+    const leaving = () => {
+        if (api.visible) {
+            if (hooks.pause) hooks.pause(true);
+            wake(false);
+        }
+    };
+    document.addEventListener('visibilitychange', () => { if (document.hidden) leaving(); });
+    window.addEventListener('pagehide', leaving);
+
     const api = {
         /** The one object the player reads; handed over once, kept alive. */
         state: t,
@@ -381,6 +419,7 @@ export function initTouch(hooks) {
             const on = !!(hooks.visible && hooks.visible());
             if (on !== api.visible) {
                 api.visible = on;
+                wake(on);                       // no await: a lock that never comes is fine
                 root.classList.toggle('on', on);
                 if (pads) pads.classList.toggle('on', on);
                 if (!on) {
