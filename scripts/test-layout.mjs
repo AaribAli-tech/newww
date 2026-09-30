@@ -278,8 +278,8 @@ for (const dev of DEVICES) {
         // showing its chrome: a card centred in it drifts down under the toolbar, and
         // the scope's glass and crosshair drift off the point being aimed at with it.
         const LAYERS = ['gameCanvas', 'hud', 'touchUI', 'touchPads', 'loader', 'menu',
-            'diffGate', 'panel', 'pause', 'end', 'death', 'board', 'rotate', 'scope',
-            'dmgDirs', 'damageVig', 'lowHp', 'screenFlash', 'nukeSeq', 'nukeBars'];
+            'diffGate', 'panel', 'howTo', 'pause', 'end', 'death', 'board', 'rotate',
+            'scope', 'dmgDirs', 'damageVig', 'lowHp', 'screenFlash', 'nukeSeq', 'nukeBars'];
         const offLayer = [];
         for (const id of LAYERS) {
             const extra = id === 'gameCanvas' ? ['canvas#gameCanvas']

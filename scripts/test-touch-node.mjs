@@ -41,7 +41,10 @@ class El {
         this._l = new Map();
         this.textContent = '';
         this.disabled = false;
+        this.children = [];
+        this.dataset = {};
     }
+    appendChild(c) { this.children.push(c); c.parent = this; return c; }
     addEventListener(t, f) { if (!this._l.has(t)) this._l.set(t, []); this._l.get(t).push(f); }
     removeEventListener(t, f) { (this._l.get(t) || []).splice((this._l.get(t) || []).indexOf(f) >>> 0, 1); }
     dispatchEvent(e) {
@@ -51,6 +54,11 @@ class El {
         if (e.bubbles && this.parent) this.parent.dispatchEvent(e);
         return !e.defaultPrevented;
     }
+    // `host.innerHTML = ''` is how both menu lists are cleared before a rebuild, so
+    // the shim has to honour it — otherwise a rebuild doubles the list instead of
+    // replacing it and the count in the test stops meaning anything.
+    get innerHTML() { return this._html || ''; }
+    set innerHTML(v) { this._html = v; if (!v) this.children.length = 0; }
     closest(sel) { return sel === '#touchUI' ? el('touchUI') : null; }
     setPointerCapture(id) { this.captured = id; }
     releasePointerCapture() { this.captured = null; }
@@ -115,6 +123,7 @@ globalThis.matchMedia = q => ({ matches: /coarse|hover: *none/.test(q), addEvent
 globalThis.document = {
     body: el('body'), documentElement: el('html'),
     getElementById: id => el(id),
+    createElement: tag => new El(tag),
     addEventListener() { }, removeEventListener() { },
     fullscreenElement: null,
     exitFullscreen: () => Promise.resolve()
@@ -666,6 +675,47 @@ group('the desktop path');
     for (const f of (winListeners.get('pagehide') || [])) f({});
     await tick();
     ok('pagehide is the other way out, and it is a pause too', paused === true && locks.freed === 2);
+}
+
+
+// ── 11 · how to play: the menu card, filled from the real catalogues ────────
+// The card is the one place a new player is told how to play, so the test drives
+// the real hud.js rather than reading the copy: whatever the game would print is
+// what is asserted. Every mode has to arrive with its rules *and* its how-to line,
+// and the reward rows have to name the count and how to fire them.
+{
+    await import('../src/js/hud.js');                 // builds the menu lists
+    const { MODES } = await import('../src/js/modes.js');
+    const { STREAKS } = await import('../src/js/killstreaks.js');
+    await new Promise(r => setTimeout(r, 0));         // hud's own catalogue lands async
+
+    const mh = el('howModes'), sh = el('howStreaks');
+    ok('the how-to card lists every mode the menu offers',
+        mh.children.length === MODES.length, `${mh.children.length} rows for ${MODES.length} modes`);
+    ok('in the same order, with the name and the rules the menu shows',
+        mh.children.every((r, i) => r.children.length === 3
+            && r.children[0].textContent === MODES[i].name
+            && r.children[1].textContent === MODES[i].desc),
+        mh.children.map(r => r.children[0].textContent).join(' · '));
+    ok('and every row says what you do in the mode, not only what it is',
+        mh.children.every(r => r.children[2].textContent.length > 40),
+        mh.children.map(r => r.children[2].textContent.length).join('/') + ' chars');
+
+    ok('the reward rows are the game\'s own rewards, with their counts',
+        sh.children.length === STREAKS.length && sh.children.every((r, i) =>
+            r.children[0].textContent === STREAKS[i].label
+            && r.children[1].textContent.indexOf(`${STREAKS[i].need} kills`) === 0),
+        sh.children.map(r => r.children[1].textContent).join(' · '));
+    ok('a run reward counts a run, and the nuke counts the match',
+        /kills in a row/.test(sh.children[0].children[1].textContent)
+        && /kills in the match/.test(sh.children[STREAKS.length - 1].children[1].textContent));
+    ok('each reward says the key for a keyboard and the tile for a thumb',
+        sh.children.every(r => {
+            const key = r.children[1].children.find(c => c.className === 'deskRow');
+            const tap = r.children[1].children.find(c => c.className === 'touchRow');
+            return key && tap && /^ · [A-Z]$/.test(key.textContent) && /tap the tile/.test(tap.textContent);
+        }),
+        (sh.children[0].children[1].children.find(c => c.className === 'deskRow') || {}).textContent);
 }
 
 console.log(`\n${fail === 0 ? '✓' : '✗'} ${pass} passed, ${fail} failed   (touch, no browser needed)\n`);

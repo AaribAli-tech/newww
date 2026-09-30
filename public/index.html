@@ -6,8 +6,8 @@
       user-scalable=no, viewport-fit=cover">
 <title>NUKETOWN</title>
 
-<link rel="stylesheet" href="/css/styles.a21f2505fc.css">
-<link rel="preload" as="script" crossorigin href="/js/game.708d672cb7.js">
+<link rel="stylesheet" href="/css/styles.6197ce7e7b.css">
+<link rel="preload" as="script" crossorigin href="/js/game.86ed3d8781.js">
 <link rel="preload" as="font" type="font/woff2" crossorigin href="/fonts/rajdhani-400.759a9000e4.woff2">
 <link rel="preload" as="font" type="font/woff2" crossorigin href="/fonts/teko-700.a57552efb2.woff2">
 <link rel="icon" href="/favicon.svg" type="image/svg+xml">
@@ -50,6 +50,7 @@
     <div id="menuDiff"><span>Difficulty</span><b id="menuDiffVal">Medium</b>
       <button id="btnDiffChange" type="button">change</button></div>
     <button class="menuBtn primary" id="btnStart">Deploy</button>
+    <button class="menuBtn" id="btnHowTo" type="button">How to Play</button>
     <button class="menuBtn" id="btnControls">Controls</button>
     <button class="menuBtn" id="btnMute">Sound: On</button>
     <button class="menuBtn touchRow" id="menuFull" type="button">Fullscreen</button>
@@ -139,6 +140,58 @@
       Resolution scales automatically to hold 60 FPS within the chosen quality.
     </div>
     <button class="menuBtn" id="btnPanelClose" style="margin-top:14px">Back</button>
+  </div>
+</div>
+
+<!-- ════════ HOW TO PLAY — the menu's read-me ════════
+     The mode blocks and the reward rows are filled in from modes.js and
+     killstreaks.js by hud.js (buildHowTo); only the controls are written here,
+     because they are markup and not a table. Two sets: the keyboard/mouse rows are
+     `.deskRow` and the on-screen-button rows are `.touchRow`, and exactly one set is
+     visible on the machine you are holding. -->
+<div id="howTo">
+  <div class="card">
+    <h2>How to Play</h2>
+    <p class="gateSub">Everything you need to know before you deploy.</p>
+
+    <h3 class="howHead">Win the match</h3>
+    <div id="howModes"></div>
+
+    <h3 class="howHead">Move</h3>
+    <div class="kv deskRow"><span>Walk</span><b>W A S D</b></div>
+    <div class="kv deskRow"><span>Sprint</span><b>SHIFT</b></div>
+    <div class="kv deskRow"><span>Crouch</span><b>C &nbsp;/&nbsp; CTRL</b></div>
+    <div class="kv deskRow"><span>Jump</span><b>SPACE</b></div>
+    <div class="kv touchRow"><span>Move</span><b>LEFT THUMB STICK</b></div>
+    <div class="kv touchRow"><span>Sprint</span><b>PUSH THE STICK TO THE EDGE</b></div>
+    <div class="kv touchRow"><span>Look around</span><b>DRAG THE RIGHT SIDE</b></div>
+    <div class="kv touchRow"><span>Crouch &nbsp;/&nbsp; Jump</span><b>THE &#8615; AND &#8613; BUTTONS</b></div>
+
+    <h3 class="howHead">Shoot</h3>
+    <div class="kv deskRow"><span>Fire</span><b>LEFT MOUSE</b></div>
+    <div class="kv deskRow"><span>Aim down sights</span><b>RIGHT MOUSE</b></div>
+    <div class="kv deskRow"><span>Reload</span><b>R</b></div>
+    <div class="kv deskRow"><span>Weapon</span><b>1 – 4 &nbsp;/&nbsp; Q &nbsp;/&nbsp; WHEEL</b></div>
+    <div class="kv touchRow"><span>Fire</span><b>THE BIG FIRE BUTTON</b></div>
+    <div class="kv touchRow"><span>Fire while strafing</span><b>THE SMALL SECOND TRIGGER, LEFT</b></div>
+    <div class="kv touchRow"><span>Aim down sights</span><b>AIM &mdash; TAP OR HOLD</b></div>
+    <div class="kv touchRow"><span>Reload &nbsp;/&nbsp; Swap</span><b>THE &#8635; AND &#8646; BUTTONS</b></div>
+
+    <h3 class="howHead">Rewards</h3>
+    <div id="howStreaks"></div>
+
+    <h3 class="howHead">The rest</h3>
+    <div class="kv deskRow"><span>Scoreboard</span><b>TAB</b></div>
+    <div class="kv deskRow"><span>Pause</span><b>ESC</b></div>
+    <div class="kv deskRow"><span>While you are down</span><b>WASD FLY &nbsp;·&nbsp; SPACE / C &nbsp;·&nbsp; J NEXT</b></div>
+    <div class="kv touchRow"><span>While you are down</span><b>&#9650;&#9660; FLY &nbsp;·&nbsp; NEXT TO SWITCH</b></div>
+    <div class="kv touchRow"><span>Scoreboard</span><b>HOLD THE &#9776; BUTTON</b></div>
+    <div class="kv touchRow"><span>Pause &nbsp;/&nbsp; Sound</span><b>THE TOP-RIGHT CHIPS</b></div>
+    <div class="kv touchRow"><span>Fullscreen</span><b>THE &#9974; CHIP, TOP CENTRE</b></div>
+    <p class="howNote touchRow">Drag the right side of the screen to look, and lean on
+      the pause chip to leave. Everything here can be re-sized in Controls.</p>
+
+    <button class="menuBtn" id="btnHowToClose" type="button" style="margin-top:14px">Back</button>
   </div>
 </div>
 
@@ -339,6 +392,6 @@
   </div>
 </div>
 
-<script type="module" src="/js/game.708d672cb7.js"></script>
+<script type="module" src="/js/game.86ed3d8781.js"></script>
 </body>
 </html>

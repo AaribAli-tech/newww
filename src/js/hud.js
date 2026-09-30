@@ -28,10 +28,14 @@ function txt(el, v) {
 // modes.js may not exist yet in a partial build, so it is pulled in
 // dynamically and the catalogue falls back to the spec list.
 const FALLBACK_MODES = [
-    { id: 'tdm', name: 'Team Deathmatch', desc: '5v5 · first to 75 kills · respawns on.' },
-    { id: 'ctl', name: 'Round Control', desc: '3v3 · one life per round · first to 3 rounds.' },
-    { id: 'ffa', name: 'Free For All', desc: '8 solos · no teams · first to 200 kills, anyone can win.' },
-    { id: 'gun', name: 'Gun Game', desc: '4 guns · every kill moves you up a gun · finish the ladder first.' }
+    { id: 'tdm', name: 'Team Deathmatch', desc: '5v5 · first to 75 kills · respawns on.',
+      how: 'Ten minutes, a respawn either way, and all three rewards. Stay with your squad.' },
+    { id: 'ctl', name: 'Round Control', desc: '3v3 · one life per round · first to 3 rounds.',
+      how: 'One life a round, and you cannot move for the first five seconds.' },
+    { id: 'ffa', name: 'Free For All', desc: '8 solos · no teams · first to 200 kills, anyone can win.',
+      how: 'Everyone is hostile, and the bots grind each other too. UAV and airstrike only.' },
+    { id: 'gun', name: 'Gun Game', desc: '4 guns · every kill moves you up a gun · finish the ladder first.',
+      how: 'Ten solos, all starting on the M4A1. Every kill moves you up a rung — MP5, SPAS-12, R700, then round again.' }
 ];
 let modeList = FALLBACK_MODES;
 let modeId = FALLBACK_MODES[0].id;
@@ -78,11 +82,69 @@ export function setSelectedMode(id) {
 
 export function onModeChange(cb) { if (typeof cb === 'function') modeListeners.push(cb); }
 
-if ($('modePick')) buildModePicker();
-else document.addEventListener('DOMContentLoaded', buildModePicker, { once: true });
+// ── how to play (main menu) ─────────────────────────────────────────────────
+/**
+ * Fills the menu's How to Play card.
+ *
+ * Everything it prints comes out of the two catalogues the game already plays by:
+ * the mode list above (modes.js) and STREAKS (killstreaks.js). A second,
+ * hand-written copy of the rules would be right on the day it was written and
+ * wrong the first time a mode or a reward changed, and the player would be reading
+ * one game while playing another. Only the controls are written out by hand, in
+ * index.html, because they are markup and not a table.
+ */
+function buildHowTo() {
+    const mh = $('howModes');
+    if (mh) {
+        mh.innerHTML = '';
+        for (const m of modeList) {
+            const d = document.createElement('div');
+            d.className = 'howMode';
+            const nm = document.createElement('span');
+            nm.className = 'nm'; nm.textContent = m.name || m.id;
+            const ds = document.createElement('span');
+            ds.className = 'ds'; ds.textContent = m.desc || '';
+            const hw = document.createElement('span');
+            hw.className = 'hw'; hw.textContent = m.how || '';
+            d.appendChild(nm); d.appendChild(ds); d.appendChild(hw);
+            mh.appendChild(d);
+        }
+    }
+    const sh = $('howStreaks');
+    if (sh) {
+        sh.innerHTML = '';
+        for (const s of STREAKS) {
+            const row = document.createElement('div');
+            row.className = 'kv';
+            const k = document.createElement('span');
+            k.textContent = s.label;
+            const v = document.createElement('b');
+            // The nuke counts the whole match; the other two count a run of kills.
+            v.textContent = s.mode === 'total'
+                ? `${s.need} kills in the match` : `${s.need} kills in a row`;
+            if (s.key) {
+                const kb = document.createElement('span');
+                kb.className = 'deskRow';        // no keyboard on a phone to press
+                kb.textContent = ` · ${s.key.replace('Key', '')}`;
+                v.appendChild(kb);
+            }
+            const tb = document.createElement('span');
+            tb.className = 'touchRow';           // on a phone the HUD tile is the button
+            tb.textContent = ' · tap the tile';
+            v.appendChild(tb);
+            row.appendChild(k); row.appendChild(v);
+            sh.appendChild(row);
+        }
+    }
+}
+
+function buildMenus() { buildModePicker(); buildHowTo(); }
+
+if ($('modePick') || $('howModes')) buildMenus();
+else document.addEventListener('DOMContentLoaded', buildMenus, { once: true });
 
 import('./modes.js').then(m => {
-    if (Array.isArray(m.MODES) && m.MODES.length) { modeList = m.MODES; buildModePicker(); }
+    if (Array.isArray(m.MODES) && m.MODES.length) { modeList = m.MODES; buildMenus(); }
 }).catch(() => { /* modes.js absent — the fallback list still plays TDM */ });
 
 // ── minimap geometry (canvas backing pixels; CSS size is half this) ─────────

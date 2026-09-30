@@ -2142,6 +2142,54 @@ group('touch — the phone HUD and the desktop it must not disturb');
         && /body\.touch #rotate\{display:grid\}/.test(css));
     ok('and that overlay is CSS, not a resize handler', !/classList\.(add|toggle|remove)\('portrait'\)/.test(tjs + mjs));
     ok('buttons swallow the browser tap', /-webkit-tap-highlight-color:transparent/.test(css));
+    // 4a · How to Play: the menu button, the card, and where its words come from.
+    const hudSrc = await readFile(new URL('../src/js/hud.js', import.meta.url), 'utf8');
+    const modesSrc = await readFile(new URL('../src/js/modes.js', import.meta.url), 'utf8');
+    ok('the main menu offers How to Play, and the card it opens exists',
+        /<button class="menuBtn" id="btnHowTo" type="button">How to Play<\/button>/.test(html)
+        && /<div id="howTo">/.test(html) && /id="btnHowToClose"/.test(html));
+    ok('the card is built from the mode catalogue and the streak table',
+        /function buildHowTo\(\)/.test(hudSrc)
+        && /for \(const m of modeList\)/.test(hudSrc) && /for \(const s of STREAKS\)/.test(hudSrc)
+        && /const sh = \$\('howStreaks'\)/.test(hudSrc) && /const mh = \$\('howModes'\)/.test(hudSrc),
+        'a hand-written second copy of the rules is a copy that drifts');
+    ok('every mode says what you do in it, and the fallback list says it too',
+        (modesSrc.match(/how: '/g) || []).length >= 4
+        && (hudSrc.match(/how: '/g) || []).length >= 4
+        && !/how: ''/.test(modesSrc) && /ds\.textContent = m\.desc/.test(hudSrc) && /hw\.textContent = m\.how/.test(hudSrc));
+    ok('the rewards rows give the count and how to fire them',
+        /s\.mode === 'total'/.test(hudSrc) && /kills in the match/.test(hudSrc)
+        && /kills in a row/.test(hudSrc) && /tap the tile/.test(hudSrc)
+        && /s\.key\.replace\('Key', ''\)/.test(hudSrc));
+    ok('and the card only claims what the modes actually do',
+        // the copy says the nuke is Team Deathmatch only; every mode that switches a
+        // reward off must switch off that one, or the card is telling a lie.
+        [...modesSrc.matchAll(/disabledStreaks = new Set\(\[([^\]]*)\]\)/g)]
+            .every(m => /'nuke'/.test(m[1]))
+        && (modesSrc.match(/disabledStreaks = new Set/g) || []).length >= 3,
+        'the modes that disable a reward disable the nuke');
+    ok('How to Play opens, closes, and gets out of the way',
+        /\$\('btnHowTo'\)\.onclick = \(\) => \$\('howTo'\)\.style\.display = 'flex'/.test(mjs)
+        && /\$\('btnHowToClose'\)\.onclick = \(\) => \$\('howTo'\)\.style\.display = 'none'/.test(mjs)
+        && /\$\('howTo'\)\.style\.display === 'flex'/.test(mjs)
+        && /\$\('howTo'\)\.style\.display = 'none';/.test(mjs),
+        'Escape and the start of a match both have to take it down');
+    ok('and a tap on the dark around the card closes it',
+        /\$\('howTo'\)\.onclick = e => \{ if \(e\.target === \$\('howTo'\)\)/.test(mjs),
+        'the Back button is a scroll away on a phone');
+    ok('and the pointer belongs to it while it is up',
+        /const ht = \$\('howTo'\);\s*\n\s*if \(ht && ht\.style\.display === 'flex'\) return true;/.test(mjs));
+    ok('the keyboard rows and the phone rows are never both on screen',
+        /body:not\(\.touch\) \.touchRow\{display:none\}/.test(css)
+        && /body\.touch \.deskRow\{display:none\}/.test(css));
+    ok('the phone menu grid takes the fifth button',
+        /html\.vh-560 body\.touch #btnHowTo, html\.vh-560 body\.touch #btnControls,/.test(css)
+        && /html\.vh-560 body\.touch #btnHowTo\{grid-row:3\}/.test(css)
+        && /html\.vh-560 body\.touch #menuFull\{grid-row:6\}/.test(css));
+    ok('the card scrolls instead of hanging off the screen',
+        /body:not\(\.touch\) #howTo \.card\{max-height:88vh;overflow:auto\}/.test(css)
+        && /html\.vh-560 body\.touch \.card\{[\s\S]{0,120}?max-height:calc\(var\(--vhpx,100dvh\) - 44px\);overflow:auto\}/.test(css),
+        'on a phone 88vh is the layout viewport — the one the toolbar is inside');
     ok('every control releases on pointercancel too',
         (tjs.match(/pointercancel/g) || []).length >= 4 && /lostpointercapture/.test(tjs));
 
@@ -2241,7 +2289,7 @@ group('touch — the phone HUD and the desktop it must not disturb');
     ok('the menus and the cards are that rectangle too, not the layout viewport',
         /body\.touch #loader, body\.touch #menu, body\.touch #diffGate, body\.touch #panel,/.test(css)
         && /body\.touch #pause, body\.touch #end, body\.touch #death, body\.touch #board,/.test(css)
-        && /body\.touch #rotate, body\.touch #scope, body\.touch #dmgDirs, body\.touch #damageVig,/.test(css)
+        && /body\.touch #howTo, body\.touch #rotate, body\.touch #scope, body\.touch #dmgDirs, body\.touch #damageVig,/.test(css)
         && !/#menu,#panel,#pause,#end,#diffGate,#board,#loader\{min-height:100dvh\}/.test(css),
         'a card centred in the layout viewport is centred under the toolbar');
     ok('and published, so every full-screen layer is the same rectangle',

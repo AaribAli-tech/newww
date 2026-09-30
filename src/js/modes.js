@@ -20,10 +20,14 @@ import { SPAWN_A, SPAWN_B } from './map.js';
 import { TEAM_A, TEAM_B, MAP_SCALE } from './utils.js';
 
 export const MODES = [
-    { id: 'tdm', name: 'Team Deathmatch', desc: '5v5 · first to 75 kills · respawns on.' },
-    { id: 'ctl', name: 'Round Control',   desc: '3v3 · one life per round · first to 3 rounds.' },
-    { id: 'ffa', name: 'Free For All',    desc: '8 solos · no teams · first to 200 kills, anyone can win.' },
-    { id: 'gun', name: 'Gun Game',        desc: '75 kills · 4 guns, and they keep cycling as you climb.' }
+    { id: 'tdm', name: 'Team Deathmatch', desc: '5v5 · first to 75 kills · respawns on.',
+      how: 'Ten minutes, a respawn either way, and all three rewards. Stay with your squad: a death only costs you the walk back.' },
+    { id: 'ctl', name: 'Round Control',   desc: '3v3 · one life per round · first to 3 rounds.',
+      how: 'One life a round, and you cannot move for the first five seconds. When you go down you watch the round out with the free camera.' },
+    { id: 'ffa', name: 'Free For All',    desc: '8 solos · no teams · first to 200 kills, anyone can win.',
+      how: 'Everyone is hostile, and the bots grind each other too, so watch every angle. UAV and airstrike are in; the nuke is not.' },
+    { id: 'gun', name: 'Gun Game',        desc: '75 kills · 4 guns, and they keep cycling as you climb.',
+      how: 'Ten solos, all starting on the M4A1. Every kill moves you up a rung — MP5, SPAS-12, R700, then round again. It ends on 75 kills.' }
 ];
 
 // ── tables ──────────────────────────────────────────────────────────────────

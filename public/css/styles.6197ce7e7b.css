@@ -219,6 +219,24 @@ canvas#gameCanvas{display:block;width:100vw;height:100vh}
 .kv{display:flex;justify-content:space-between;padding:7px 0;border-bottom:1px solid rgba(255,255,255,.06);
   font-size:15px;color:rgba(255,255,255,.75);letter-spacing:1px}
 .kv b{color:#fff;font-weight:600;font-family:'Barlow Condensed',sans-serif;letter-spacing:2px}
+
+/* how to play — the settings card's twin, except that this one is read rather
+   than operated: it scrolls, and the mode and reward rows in it are filled from
+   modes.js and killstreaks.js by hud.js so the card can never describe a game the
+   build does not play. */
+#howTo{position:fixed;inset:0;z-index:1100;display:none;align-items:center;justify-content:center;
+  background:rgba(3,5,8,.94)}
+body:not(.touch) #howTo .card{max-height:88vh;overflow:auto}
+.howHead{font-family:'Barlow Condensed',sans-serif;font-size:12.5px;letter-spacing:.34em;
+  text-transform:uppercase;color:rgba(255,255,255,.45);margin:18px 0 8px}
+.howMode{display:flex;flex-direction:column;gap:2px;padding:9px 13px;margin-bottom:6px;
+  border:1px solid rgba(255,255,255,.13);border-left:2px solid var(--accent);
+  background:rgba(255,255,255,.03)}
+.howMode .nm{font-family:'Teko',sans-serif;font-size:21px;line-height:1;letter-spacing:.14em;
+  text-transform:uppercase;color:rgba(255,255,255,.86)}
+.howMode .ds{font-size:12.5px;letter-spacing:.4px;color:rgba(255,255,255,.48)}
+.howMode .hw{font-size:13.5px;color:rgba(255,255,255,.74);margin-top:3px}
+.howNote{font-size:12.5px;color:rgba(255,255,255,.42);letter-spacing:.02em;margin:10px 0 0}
 .rowSet{display:flex;align-items:center;gap:14px;padding:12px 0;flex-wrap:wrap}
 /* Two things were folding here: the label shrank to fit the row, and the note
    beside "Enemy skill" is a sentence that was being typeset inside a 62 px
@@ -733,7 +751,7 @@ body.touch #gameCanvas{position:fixed;left:0;top:0}
    none of them can drift. */
 body.touch #loader, body.touch #menu, body.touch #diffGate, body.touch #panel,
 body.touch #pause, body.touch #end, body.touch #death, body.touch #board,
-body.touch #rotate, body.touch #scope, body.touch #dmgDirs, body.touch #damageVig,
+body.touch #howTo, body.touch #rotate, body.touch #scope, body.touch #dmgDirs, body.touch #damageVig,
 body.touch #lowHp, body.touch #screenFlash, body.touch #nukeSeq, body.touch #nukeBars{
   height:var(--vhpx,100dvh);bottom:auto}
 /* The menu is the one card that is not a `body.touch .card`, so it scrolls itself
@@ -767,27 +785,17 @@ body.touch #menu::after{position:fixed}
   html.vh-560 body.touch .subrule i{width:34px}
   html.vh-560 body.touch #modePickLabel{grid-column:1;font-size:9.5px;letter-spacing:.3em}
   html.vh-560 body.touch #modePick{grid-column:1;width:100%;margin:0;gap:4px}
-  html.vh-560 body.touch #menuName,
-
-  html.vh-560 body.touch #menuDiff{grid-column:1;margin:8px 0 0;font-size:11px;gap:6px}
-  html.vh-560 body.touch #menuName span,
-
-  html.vh-560 body.touch #menuDiff span{min-width:58px;font-size:10.5px}
-  html.vh-560 body.touch #menuName input,
-
-  html.vh-560 body.touch #menuDiff,
-
-  html.vh-560 body.touch #gateName input{height:28px;font-size:12.5px}
+  html.vh-560 body.touch #menuName, html.vh-560 body.touch #menuDiff{grid-column:1;margin:8px 0 0;font-size:11px;gap:6px}
+  html.vh-560 body.touch #menuName span, html.vh-560 body.touch #menuDiff span{min-width:58px;font-size:10.5px}
+  html.vh-560 body.touch #menuName input, html.vh-560 body.touch #menuDiff, html.vh-560 body.touch #gateName input{height:28px;font-size:12.5px}
   html.vh-560 body.touch #btnStart{grid-column:2;grid-row:1/3;align-self:center;height:38px;font-size:13px;padding:0 18px;margin:0}
-  html.vh-560 body.touch #btnControls,
-
-  html.vh-560 body.touch #btnMute,
-
-  html.vh-560 body.touch #menuFull{grid-column:2;font-size:11.5px;height:30px;padding:0 12px;margin:0;letter-spacing:.16em}
+  html.vh-560 body.touch #btnHowTo, html.vh-560 body.touch #btnControls,
+  html.vh-560 body.touch #btnMute, html.vh-560 body.touch #menuFull{grid-column:2;font-size:11.5px;height:30px;padding:0 12px;margin:0;letter-spacing:.16em}
   html.vh-560 body.touch #menu .menuInner{grid-template-rows:auto auto auto auto auto auto auto}
-  html.vh-560 body.touch #btnControls{grid-row:3}
-  html.vh-560 body.touch #btnMute{grid-row:4}
-  html.vh-560 body.touch #menuFull{grid-row:5}
+  html.vh-560 body.touch #btnHowTo{grid-row:3}
+  html.vh-560 body.touch #btnControls{grid-row:4}
+  html.vh-560 body.touch #btnMute{grid-row:5}
+  html.vh-560 body.touch #menuFull{grid-row:6}
   html.vh-560 body.touch #menu{padding:0}
   html.vh-560 body.touch #menuFoot{font-size:10px;letter-spacing:.22em;bottom:6px}
   html.vh-560 body.touch .menuBtn{padding:8px 14px;letter-spacing:.2em;font-size:12.5px}
@@ -809,19 +817,13 @@ body.touch #menu::after{position:fixed}
   html.vh-560 body.touch #roundPips{gap:5px}
   html.vh-560 body.touch #roundPips i{width:8px;height:4px}
   html.vh-560 body.touch #livesTag{font-size:9px}
-  html.vh-560 body.touch #modeLine,
-
-  html.vh-560 body.touch #modeState{display:none}/* The feed, the ammo block and the reward tiles are one column now (see the
+  html.vh-560 body.touch #modeLine, html.vh-560 body.touch #modeState{display:none}/* The feed, the ammo block and the reward tiles are one column now (see the
      phone section); the numbers they used to be placed by are gone with it. */
   html.vh-560 body.touch #eventFeed{font-size:12px}
   html.vh-560 body.touch #hpNum{font-size:22px}/* its corner is set once, in the phone section */
   html.vh-560 body.touch #hpBar{width:104px}
   html.vh-560 body.touch .stk .ky{display:none}/* no keyboard on a phone to key-map */
-  html.vh-560 body.touch #reloadHint,
-
-  html.vh-560 body.touch #pauseHint,
-
-  html.vh-560 body.touch #ntHint{display:none}
+  html.vh-560 body.touch #reloadHint, html.vh-560 body.touch #pauseHint, html.vh-560 body.touch #ntHint{display:none}
   html.vh-560 body.touch .card{padding:14px 16px;max-height:calc(var(--vhpx,100dvh) - 44px);overflow:auto}
   html.vh-560 body.touch .kv{font-size:12px;padding:5px 0}
   html.vh-560 body.touch .rowSet{padding:8px 0;gap:10px}
@@ -829,9 +831,7 @@ body.touch #menu::after{position:fixed}
   html.vh-560 body.touch .rowSet output{font-size:16px;width:52px;min-width:52px}
   html.vh-560 body.touch #board .bwrap{max-height:calc(var(--vhpx,100dvh) - 64px);overflow:auto}
   html.vh-560 body.touch #board .br{font-size:11.5px}
-  html.vh-560 body.touch #pause .menuBtn,
-
-  html.vh-560 body.touch #end .menuBtn{height:36px;font-size:13px}
+  html.vh-560 body.touch #pause .menuBtn, html.vh-560 body.touch #end .menuBtn{height:36px;font-size:13px}
 
 
 
@@ -843,9 +843,7 @@ body.touch #menu::after{position:fixed}
 
   html.vh-420 body.touch #menu h1{font-size:34px}
   html.vh-420 body.touch #modePick button{padding:5px 9px;font-size:11.5px}
-  html.vh-420 body.touch #menuName,
-
-  html.vh-420 body.touch #menuDiff{margin-top:5px}/* One line of feed, a smaller counter and a smaller tile: this tier also has to fit
+  html.vh-420 body.touch #menuName, html.vh-420 body.touch #menuDiff{margin-top:5px}/* One line of feed, a smaller counter and a smaller tile: this tier also has to fit
      a phone that is showing its own toolbar, where the band between the top chips and
      the thumb grid is a third shorter than the height the phone reports. */
 
@@ -927,6 +925,9 @@ body.touch #healthWrap{bottom:calc(var(--mini) + var(--gap) * 2 + env(safe-area-
 
   html.vh-340 body.touch #killfeed{display:none}
   html.vh-340 body.touch .tb .sc{font-size:14px}
+  html.vh-340 body.touch .howMode .nm{font-size:19px}
+  html.vh-340 body.touch .howMode .hw{font-size:12.5px}
+  html.vh-340 body.touch .howHead{margin:13px 0 6px}
   html.vh-340 body.touch #timer{display:none}/* the round row goes before the clock */
 
 /* The last tier: a phone whose *picture* is under 300 px tall — a small phone in a
@@ -942,6 +943,10 @@ body.touch #healthWrap{bottom:calc(var(--mini) + var(--gap) * 2 + env(safe-area-
 
   html.vh-300 body.touch #killfeed{display:none}
 
+  html.vh-300 body.touch .howMode{padding:7px 10px}
+  html.vh-300 body.touch .howMode .nm{font-size:17px}
+  html.vh-300 body.touch .howMode .ds{font-size:11.5px}
+  html.vh-300 body.touch .howMode .hw{font-size:12px}
   html.vh-300 body.touch #slots{display:none}
 
 
@@ -992,7 +997,8 @@ body.touch #healthWrap{bottom:calc(var(--mini) + var(--gap) * 2 + env(safe-area-
 body.touch #death{pointer-events:none}
 
 /* Touch-only rows in the Controls card, and the keyboard list it replaces. */
-body:not(.touch) .touchRow{display:none}
+body:not(.touch) .touchRow{display:none}   /* the phone's rows on a desktop … */
+body.touch .deskRow{display:none}          /* … and the keyboard's rows on a phone */
 body.touch #panel .kv{display:none}
 body.touch #modePick{width:100%}
 /* The perf strip is a debug readout with a keyboard toggle (F). A phone has no

@@ -348,6 +348,10 @@ function menuOpen() {
     // you cannot see the pointer of is not a slider.
     const pn = $('panel');
     if (pn && pn.style.display === 'flex') return true;
+    // How to Play is a card from the menu, and it stays up over one: it counts as a
+    // menu for the same reason the settings card does — the pointer belongs to it.
+    const ht = $('howTo');
+    if (ht && ht.style.display === 'flex') return true;
     return ['pause', 'end', 'diffGate'].some(id => { const n = $(id); return !!n && n.classList.contains('on'); });
 }
 
@@ -752,6 +756,9 @@ function bindUI() {
     $('btnStart').onclick = () => { A.unlockAudio(); startMatch(); };
     $('btnControls').onclick = () => $('panel').style.display = 'flex';
     $('btnPanelClose').onclick = () => $('panel').style.display = 'none';
+    $('btnHowTo').onclick = () => $('howTo').style.display = 'flex';
+    $('btnHowToClose').onclick = () => $('howTo').style.display = 'none';
+    $('howTo').onclick = e => { if (e.target === $('howTo')) $('howTo').style.display = 'none'; };
     $('btnMute').onclick = () => {
         const m = A.toggleMute();
         $('btnMute').textContent = 'Sound: ' + (m ? 'Off' : 'On');
@@ -850,6 +857,7 @@ function bindUI() {
     window.addEventListener('keydown', e => {
         if (e.code === 'Escape') {
             if (diffGateOpen()) { hideDiffGate(); return; }
+            if ($('howTo').style.display === 'flex') { $('howTo').style.display = 'none'; return; }
             if ($('panel').style.display === 'flex') { $('panel').style.display = 'none'; return; }
             if (state === 'playing') pause(true);
             else if (state === 'paused') pause(false);
@@ -1061,6 +1069,7 @@ function startMatch() {
     if (!isDifficulty(settings.difficulty)) setDifficulty(DEFAULT_DIFFICULTY);
     $('menu').style.display = 'none';
     $('panel').style.display = 'none';
+    $('howTo').style.display = 'none';
     hud.hideEnd(); hud.hideDeath();
     killChain.reset();
     hud.clearMedals();
