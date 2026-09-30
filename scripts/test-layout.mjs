@@ -392,9 +392,12 @@ for (const dev of DEVICES) {
             hr[id] = { x: box.x + colW - w, y: colEnd, w, h };
             colEnd += h + colGap;
         }
-        // The mute and pause chips: 38 px on a phone (`body.touch .gbtn`), in from the
-        // safe area by the same 16 px the column uses.
-        hr.gameBtns = { x: dev.w - at.r - 16 - 82, y: gridGap + at.t, w: 82, h: 38 };
+        // The mute and pause chips. They are in the top row with the three touch
+        // chips now, not standing alone in the far corner: the same size as those,
+        // one gutter apart, and immediately right of the skip chip.
+        const chip = cssVar('--mini', 'v');
+        hr.gameBtns = { x: C.get('body.touch #gameBtns', 'left', 'h', at),
+            y: gridGap + at.t, w: chip * 2 + gridGap, h: chip };
         const MISSING = TIER <= 300 ? ['nukeTrack', 'killfeed', 'slots']
             : TIER <= 340 ? ['killfeed', 'slots'] : TIER <= 460 ? ['slots'] : [];
         // The column always carries the ammo block and the reward tiles; the blocks it
@@ -418,6 +421,47 @@ for (const dev of DEVICES) {
             colEnd - 4 <= boxTop + boxH + 0.5,
             `${Math.round(colEnd - 4)} px of readouts in a ${Math.round(boxTop + boxH - boxTop)} px box`
             + ` (${Math.round(boxTop)}..${Math.round(boxTop + boxH)})`);
+        // ── the top row of five chips ──
+        // Fullscreen, scoreboard, skip, pause and sound, one after another across the
+        // top and evenly spaced by the same gutter the thumb buttons use. They used to
+        // be in three places: two of them a button and a half from the third, and the
+        // other two alone in the far corner of the screen.
+        {
+            const step = chip + gridGap;
+            const centres = [R.tFull, R.tBoard, R.tSkip].map(r => r && r.x + r.w / 2)
+                .concat([hr.gameBtns.x + chip / 2, hr.gameBtns.x + chip * 1.5 + gridGap]);
+            const spaces = centres.slice(1).map((c, i) => c - centres[i]);
+            ok(`${tag}: the five top chips are one evenly spaced row`,
+                centres.every(Number.isFinite)
+                && spaces.every(d => Math.abs(d - step) <= 1),
+                spaces.map(d => d.toFixed(1)).join(', ') + ` (a step is ${step.toFixed(1)})`);
+        }
+
+        // ── the thumb block ──
+        // Six action buttons in three columns and two rows, with the trigger in the
+        // corner cell the top row leaves free: every column is a pair you can find by
+        // feel, the rows are one gutter apart and the trigger stands on the same
+        // bottom edge as the bottom row. A button in a column of its own, or a row
+        // floating a trigger's height above the others, is what "one button here, one
+        // button there" looks like on a phone — and it is measurable.
+        if (!shape.tag) {
+            const rr = ['tJump', 'tCrouch', 'tSprint', 'tReload', 'tAds', 'tSwap']
+                .map(id => R[id]).filter(Boolean);
+            const xs = [...new Set(rr.map(r => Math.round(r.x)))].sort((a, b) => a - b);
+            const ys = [...new Set(rr.map(r => Math.round(r.y)))].sort((a, b) => a - b);
+            const hGap = xs.length === 3 ? xs[1] - (xs[0] + rr[0].w) : NaN;
+            const vGap = ys.length === 2 ? ys[1] - (ys[0] + rr[0].h) : NaN;
+            const bottom = Math.max(...rr.map(r => r.y + r.h));
+            const fireBottom = R.tFire ? R.tFire.y + R.tFire.h : NaN;
+            ok(`${tag}: the thumb buttons are one block, three columns by two rows`,
+                rr.length === 6 && xs.length === 3 && ys.length === 2
+                && xs.every(x => rr.filter(r => Math.round(r.x) === x).length === 2)
+                && Math.abs(hGap - gridGap) <= 1 && Math.abs(vGap - gridGap) <= 1
+                && Math.abs(bottom - fireBottom) <= 1,
+                `${xs.length} columns, ${ys.length} rows, gutters ${hGap.toFixed(1)}/${vGap.toFixed(1)}`
+                + `, block and trigger end together at ${Math.round(bottom)}`);
+        }
+
         ok(`${tag}: the mute and pause chips are above the column`,
             hr.gameBtns.y + hr.gameBtns.h <= boxTop + 0.5,
             `chips end ${Math.round(hr.gameBtns.y + hr.gameBtns.h)} vs the column at ${Math.round(boxTop)}`);

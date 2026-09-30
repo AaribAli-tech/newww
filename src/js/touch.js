@@ -368,8 +368,13 @@ export function initTouch(hooks) {
     for (const el of [root, pads]) if (el) el.addEventListener('contextmenu', e => e.preventDefault());
 
     // ── per-frame glue ──────────────────────────────────────────────────────
-    const sizeVar = v => root.style.setProperty('--tsize', String(v));
-    const opacityVar = v => root.style.setProperty('--topaque', String(v));
+    // Written to <html>, not to #touchUI: the size and opacity variables are read
+    // by rules all over the HUD (the stick, every button, and the readout bounds in
+    // #hud), and #hud is a sibling of the touch layer. A custom property does not
+    // cross siblings, so on the touch layer alone this number reached the buttons it
+    // was written for and nothing else.
+    const sizeVar = v => document.documentElement.style.setProperty('--tsize', String(v));
+    const opacityVar = v => document.documentElement.style.setProperty('--topaque', String(v));
 
     // ── the phone leaving, and the screen while it stays ────────────────────
     // A desktop player who tabs away loses the pointer lock, and the pointer-lock

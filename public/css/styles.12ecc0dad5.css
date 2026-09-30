@@ -596,12 +596,19 @@ body:not(.touch) #howTo .card{max-height:88vh;overflow:auto}
    Sizing: every control is `vmin`, i.e. a fraction of the smaller of the two screen
    sides, so a 360×640 landscape phone and an 1024×768 tablet get the same physical
    thumb target. `--tsize` is the Controls size slider, multiplied in. */
-#touchUI{position:fixed;inset:0;z-index:120;display:none;
+/* The sizes every control and every bound is drawn from. vmin keeps a 360×640 phone
+   and a 412×915 one thumb-identical; the floors are the Free Fire targets (a 90 px
+   base, a 60-68 px trigger, 38-44 px on the arc) and --tsize is the Controls size
+   slider. STICK_R in touch.js is half of --base's floor: change one, change the other.
+   ── They are declared on `body.touch` and not on `#touchUI`, because #hud is a
+   SIBLING of the touch layer, not a child: custom properties do not cross siblings,
+   so every `var(--mini)` in a HUD rule (the readout column's bound, the left column's
+   height, the health bar's corner) was invalid and dropped, and the boxes those rules
+   were meant to bound were sized by their content instead. The harness reads the
+   declarations out of the file and resolved them anyway, which is how it passed while
+   the phone did not. touch.js writes --tsize/--topaque to <html>, above both. */
+body.touch{
   --tsize:1;--topaque:.5;
-  /* The three sizes every control is drawn from. vmin keeps a 360×640 phone and a
-     412×915 one thumb-identical; the floors are the Free Fire targets (a 90 px base,
-     a 60-68 px trigger, 38-44 px on the arc) and --tsize is the Controls size slider.
-     STICK_R in touch.js is half of --base's floor: change one, change the other. */
   --base:calc(clamp(90px,25vmin,100px) * var(--tsize));
   --fire:calc(clamp(60px,16.7vmin,68px) * var(--tsize));
   --mini:calc(clamp(38px,10.6vmin,44px) * var(--tsize));
@@ -612,14 +619,26 @@ body:not(.touch) #howTo .card{max-height:88vh;overflow:auto}
   /* Where the row of top-centre chips ends, one gap lower: the top of both readout
      columns, so neither can be placed by a number that a bigger button invalidates. */
   --topRow:calc(var(--gap) + var(--mini) + var(--gap));
-  --row1:calc(var(--gap) + (var(--fire) - var(--mini)) / 2 + env(safe-area-inset-bottom,0px));
-  --row2:calc(var(--gap) + var(--fire) + var(--gap) + env(safe-area-inset-bottom,0px));
+  --cd:calc(var(--mini) + var(--gap));            /* one column step */
+  /* The block sits on the same bottom edge as the trigger, so the two rows read as
+     one rectangle in the corner instead of a row beside the trigger with another
+     row floating above it: the gap between them is one gutter, not the height of
+     the trigger. It is also shorter, which hands the readout column above it back
+     the difference. */
+  --row1:calc(var(--gap) + env(safe-area-inset-bottom,0px));
+  --row2:calc(var(--row1) + var(--cd));
   --c1:calc(var(--gap) + var(--fire) + var(--gap) + env(safe-area-inset-right,0px));
-  --c2:calc(var(--c1) + var(--mini) + var(--gap));
-  --c3:calc(var(--c2) + var(--mini) + var(--gap));
+  --c2:calc(var(--c1) + var(--cd));
+  --c3:calc(var(--c2) + var(--cd));
+}
+#touchUI{position:fixed;inset:0;z-index:120;display:none;
   font-family:'Barlow Condensed',sans-serif;pointer-events:none;
   touch-action:none;-webkit-user-select:none;user-select:none;-webkit-touch-callout:none}
 #touchUI.on,#touchPads.on{display:block}
+/* The fullscreen chip is the leftmost of the three touch chips in that row: its
+   centre sits one button-plus-gutter left of the scoreboard chip's. */
+#tFull{left:calc(50% - var(--mini) * 1.5 - var(--gap));right:auto;
+  top:calc(var(--gap) + env(safe-area-inset-top,0px))}
 /* The pads are the lowest layer on purpose: they are invisible, so nothing is lost
    by putting them UNDER the HUD, and everything the player taps (the pause and mute
    chips, the killstreak tiles) lives inside #hud, which is its own stacking context
@@ -648,11 +667,22 @@ body:not(.touch) #howTo .card{max-height:88vh;overflow:auto}
   font-size:calc(var(--mini) * .3);line-height:1;letter-spacing:.06em;text-transform:uppercase;
   opacity:var(--topaque);transition:opacity .1s,transform .06s,background .1s,border-color .1s;
   -webkit-tap-highlight-color:transparent}
-.tbtn span{display:block;font-size:calc(var(--mini) * .46);line-height:1}
+/* Every control draws the same icon set: inline SVG on a 24×24 grid, stroked in
+   currentColor so the pressed state's colour and the opacity slider both carry.
+   The buttons used to hold Unicode symbols from the Miscellaneous block (◎ ⇆ ↥ ⛶…)
+   and those are drawn by whatever font the phone has: an emoji on one, a box on the
+   next, a hairline glyph on a third. The shapes live in the markup now, so every
+   phone shows the same button. */
+.tbtn svg{display:block;width:calc(var(--mini) * .54);height:calc(var(--mini) * .54);
+  fill:none;stroke:currentColor;stroke-width:1.8;stroke-linecap:round;stroke-linejoin:round}
+.tbtn svg .solid{fill:currentColor;stroke:none}   /* an arrowhead reads better filled */
 .tbtn.down,.tbtn.lit{opacity:1;transform:scale(.93);border-color:var(--accent);
   background:rgba(255,122,24,.26);color:#fff}
 .tbtn.hide{display:none}
 #tFire,#tFire2{width:var(--fire);height:var(--fire);font-size:calc(var(--fire) * .3)}
+/* The trigger's icon is sized off the trigger, not off the small buttons: at the
+   small-button size it was a badge floating in the middle of a 68 px circle. */
+body.touch #tFire svg{width:calc(var(--fire) * .34);height:calc(var(--fire) * .34)}
 #tFire{right:calc(var(--gap) + env(safe-area-inset-right,0px));
   bottom:calc(var(--gap) + env(safe-area-inset-bottom,0px))}
 /* A second trigger under the left thumb, so a phone can strafe and shoot at once
@@ -665,14 +695,26 @@ body:not(.touch) #howTo .card{max-height:88vh;overflow:auto}
    38 px button the neighbours of an arc are 12 px apart, and a thumb is 21 px
    wide. A grid keeps every edge at least a full button apart, which is also what
    makes "reach for it without looking" work. */
+/* Six buttons in two rows of three, and the trigger in the corner the top row
+   leaves free — so each column is a pair you can find by feel: jump over reload,
+   crouch over aim, sprint over swap. Nothing is placed in the trigger's own column
+   on the top row; that is the one cell of the rectangle the trigger keeps. */
 #tReload{right:var(--c1);bottom:var(--row1)}
 #tAds{right:var(--c2);bottom:var(--row1)}
 #tSwap{right:var(--c3);bottom:var(--row1)}
-#tJump{right:calc(var(--gap) + env(safe-area-inset-right,0px));bottom:var(--row2)}
-#tCrouch{right:var(--c1);bottom:var(--row2)}
-#tSprint{right:var(--c2);bottom:var(--row2)}
-#tBoard{left:50%;margin-left:calc(var(--mini) / -2);top:calc(var(--gap) + env(safe-area-inset-top,0px))}
-#tSkip{left:calc(50% + var(--mini));top:calc(var(--gap) + env(safe-area-inset-top,0px))}
+#tJump{right:var(--c1);bottom:var(--row2)}
+#tCrouch{right:var(--c2);bottom:var(--row2)}
+#tSprint{right:var(--c3);bottom:var(--row2)}
+/* ── the top row: five chips, one after another ──
+   The three touch chips were spread across the top of the screen — the fullscreen
+   chip sat a button and a half from the scoreboard one — and the pause and sound
+   chips stood on their own in the far corner, which is four separate places for
+   five buttons. They are one row now, evenly spaced by the same gutter the thumb
+   buttons use, and the row hangs off the scoreboard chip in the middle of the
+   screen so the whole thing moves as one number. The pair of HUD chips is only in
+   the row on a phone: a desktop keeps its corner. */
+#tBoard{left:calc(50% - var(--mini) / 2);top:calc(var(--gap) + env(safe-area-inset-top,0px))}
+#tSkip{left:calc(50% + var(--mini) / 2 + var(--gap));top:calc(var(--gap) + env(safe-area-inset-top,0px))}
 /* Free roam (the camera you ride after you die) owns different buttons: fly up and
    down instead of jumping, no trigger. */
 #tUp,#tNext{right:calc(var(--gap) + env(safe-area-inset-right,0px));display:none}
@@ -690,18 +732,36 @@ body:not(.touch) #howTo .card{max-height:88vh;overflow:auto}
 body.touch #skipRound{display:none}           /* #tSkip is the same action, sized for a thumb */
 /* The mute and pause chips live in the HUD, not the touch layer, so they stay put
    over a menu; they only get thumb-sized on a phone. */
-body.touch #gameBtns{gap:6px;z-index:130;
+body.touch #gameBtns{gap:var(--gap);z-index:130;
   top:calc(var(--gap) + env(safe-area-inset-top,0px));
   right:calc(16px + env(safe-area-inset-right,0px))}
-body.touch #gameBtns .gbtn{width:38px;height:38px;font-size:15px}
+body.touch #gameBtns .gbtn{width:var(--mini);height:var(--mini);font-size:15px}
 /* The streak tiles are the only HUD widgets you have to press, so they sit ABOVE
    the look pad (otherwise a tap meant for Airstrike turns the camera instead) and
    grow to a thumb-sized target. */
 body.touch #streakCol{z-index:130;gap:5px}
-/* Fullscreen sits with the scoreboard chip in the top-centre row: the corners are
-   taken by the minimap and by the mute/pause chips. */
-body.touch #tFull{left:calc(50% - var(--mini) * 2.15);right:auto;
-  top:calc(var(--gap) + env(safe-area-inset-top,0px))}
+/* The pause and sound chips join that row on a phone, immediately right of the
+   skip chip; a desktop leaves them in the corner. Same size as the touch chips, so
+   the row is evenly spaced rather than evenly guessed at. */
+body.touch #gameBtns{left:calc(50% + var(--mini) * 1.5 + var(--gap) * 2);right:auto}
+/* The two chips were emoji: a speaker and a pause symbol drawn by the system font,
+   in whatever colour and weight that font happens to use — the only two controls
+   left on the phone that did not match the rest. On touch they are the same stroked
+   icon set as the thumb buttons, as a mask over `currentColor`, so the chip's own
+   colour and its muted state keep working; a desktop keeps the emoji it has always
+   shown. Masking is behind @supports, so a browser without it paints nothing rather
+   than a solid square where the emoji used to be. */
+@supports ((mask-image:url("")) or (-webkit-mask-image:url(""))) {
+  body.touch #gameBtns .gbtn{font-size:0}
+  body.touch #btnHudPause::after, body.touch #btnHudMute::after{
+    content:'';width:calc(var(--mini) * .52);height:calc(var(--mini) * .52);
+    background:currentColor;-webkit-mask-repeat:no-repeat;mask-repeat:no-repeat;
+    -webkit-mask-position:center;mask-position:center;
+    -webkit-mask-size:contain;mask-size:contain}
+  body.touch #btnHudPause::after{-webkit-mask-image:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%23000' stroke-width='2.6' stroke-linecap='round'%3E%3Cpath d='M9 5v14M15 5v14'/%3E%3C/svg%3E");mask-image:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%23000' stroke-width='2.6' stroke-linecap='round'%3E%3Cpath d='M9 5v14M15 5v14'/%3E%3C/svg%3E")}
+  body.touch #btnHudMute::after{-webkit-mask-image:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%23000' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M4 9.5h3.6L12 5.2v13.6L7.6 14.5H4z'/%3E%3Cpath d='M15.6 9.2a4.4 4.4 0 0 1 0 5.6'/%3E%3Cpath d='M18.4 6.4a8.2 8.2 0 0 1 0 11.2'/%3E%3C/svg%3E");mask-image:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%23000' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M4 9.5h3.6L12 5.2v13.6L7.6 14.5H4z'/%3E%3Cpath d='M15.6 9.2a4.4 4.4 0 0 1 0 5.6'/%3E%3Cpath d='M18.4 6.4a8.2 8.2 0 0 1 0 11.2'/%3E%3C/svg%3E")}
+  body.touch #btnHudMute.off::after{-webkit-mask-image:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%23000' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M4 9.5h3.6L12 5.2v13.6L7.6 14.5H4z'/%3E%3Cpath d='M16 9.6l4.6 4.8M20.6 9.6L16 14.4'/%3E%3C/svg%3E");mask-image:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%23000' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M4 9.5h3.6L12 5.2v13.6L7.6 14.5H4z'/%3E%3Cpath d='M16 9.6l4.6 4.8M20.6 9.6L16 14.4'/%3E%3C/svg%3E")}
+}
 
 /* ── portrait: say so, and stop trying to play sideways ── */
 #rotate{position:fixed;inset:0;z-index:2600;display:none;place-items:center;text-align:center;

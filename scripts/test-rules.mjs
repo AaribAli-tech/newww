@@ -2205,6 +2205,49 @@ group('touch — the phone HUD and the desktop it must not disturb');
         && /wake\(on\)/.test(tjs) && /await lock\.release\(\)/.test(tjs),
         'a phone that dims cannot be played');
 
+    // 4c · the thumb buttons: what is drawn on them, and where they sit.
+    const tbtns = (html.match(/<button class="tbtn[^"]*"/g) || []).length;
+    ok('every thumb button draws a real icon instead of a font glyph',
+        tbtns >= 14 && (html.match(/<svg viewBox="0 0 24 24" aria-hidden="true">/g) || []).length >= 14
+        && !/<button class="tbtn[^"]*"[^>]*><span>/.test(html),
+        `${tbtns} buttons; the Unicode symbols (◎ ⇆ ↥ ⛶ …) are drawn by whatever font the phone has`);
+    ok('the button still says what it is when the icon cannot',
+        (html.match(/aria-label="[^"]+"/g) || []).length >= 14,
+        'an icon has no accessible name of its own');
+    ok('and the icon is stroked in the button\'s own colour, sized off the button',
+        /\.tbtn svg\{display:block;width:calc\(var\(--mini\) \* \.54\)/.test(css)
+        && /stroke:currentColor/.test(css) && /\.tbtn svg \.solid\{fill:currentColor;stroke:none\}/.test(css));
+    ok('the block is two rows of three, and the trigger keeps the corner cell',
+        /--cd:calc\(var\(--mini\) \+ var\(--gap\)\)/.test(css)
+        && /--row2:calc\(var\(--row1\) \+ var\(--cd\)\)/.test(css)
+        && ['tReload', 'tAds', 'tSwap'].every(id => new RegExp(`#${id}\\{right:var\\(--c[123]\\);bottom:var\\(--row1\\)\\}`).test(css))
+        && ['tJump', 'tCrouch', 'tSprint'].every(id => new RegExp(`#${id}\\{right:var\\(--c[123]\\);bottom:var\\(--row2\\)\\}`).test(css)),
+        'a row beside the trigger and a second row one gutter above it, not a trigger-height away');
+    ok('the five top chips are one evenly spaced row, in the buttons\' own gutter',
+        /#tBoard\{left:calc\(50% - var\(--mini\) \/ 2\)/.test(css)
+        && /#tSkip\{left:calc\(50% \+ var\(--mini\) \/ 2 \+ var\(--gap\)\)/.test(css)
+        && /#tFull\{left:calc\(50% - var\(--mini\) \* 1\.5 - var\(--gap\)\)/.test(css)
+        && /body\.touch #gameBtns\{left:calc\(50% \+ var\(--mini\) \* 1\.5 \+ var\(--gap\) \* 2\)/.test(css)
+        && /body\.touch #gameBtns\{gap:var\(--gap\)/.test(css));
+    // Every `#gameBtns` rule, with its selector: the base one keeps the desktop's
+    // corner, and any rule that moves the pair into the row is a `body.touch` one.
+    const gbRules = [...css.matchAll(/([^{}]*)#gameBtns\{([^}]*)\}/g)].map(m => [m[1].trim(), m[2]]);
+    ok('and a desktop still has its two chips in the corner',
+        gbRules.some(([sel, body]) => !sel.includes('.touch') && /right:16px/.test(body) && !/left:/.test(body))
+        && gbRules.every(([sel, body]) => !/left:/.test(body) || sel.includes('.touch')),
+        gbRules.map(([sel]) => sel || '(base)').join(' / '));
+    ok('the two HUD chips get the icon too — on touch only, and only with mask support',
+        /@supports \(\(mask-image:url\(""\)\) or \(-webkit-mask-image:url\(""\)\)\)/.test(css)
+        && /body\.touch #btnHudPause::after/.test(css) && /body\.touch #btnHudMute\.off::after/.test(css)
+        && /body\.touch #gameBtns \.gbtn\{font-size:0\}/.test(css)
+        && /body\.touch #gameBtns \.gbtn\{width:var\(--mini\);height:var\(--mini\);font-size:15px\}/.test(css),
+        'without a mask they would be a solid square, so they are behind @supports');
+    ok('the touch sizes are declared where #hud can inherit them',
+        /body\.touch\{[\s\S]{0,140}?--tsize:1;--topaque:\.5;[\s\S]{0,600}?--mini:calc\(clamp\(38px/.test(css)
+        && !/#touchUI\{[^}]*--mini:/.test(css)
+        && /documentElement\.style\.setProperty\('--tsize'/.test(tjs),
+        'a custom property does not cross siblings — #hud is not inside #touchUI');
+
     // 5 · main.js: how the layer is mounted, and what a phone is spared.
     ok('the mobile-only lock-out is gone from the source, not hidden in CSS',
         !/blockMobile|NOT_ON_MOBILE|notMobile/.test(html + tjs + pjs + mjs));

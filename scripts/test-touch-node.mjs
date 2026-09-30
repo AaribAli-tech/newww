@@ -487,13 +487,18 @@ step(2);
 ok('and brings them back', el('touchUI').classList.contains('on'));
 settings.ctrlSize = 1.25; settings.ctrlOpacity = 0.62;
 step(1);
+// The variables are written to <html>, which is where both #touchUI (the buttons)
+// and #hud (the readout bounds that are written in the same units) can see them. On
+// the touch layer alone they reached the buttons and nothing else — #hud is a
+// sibling of that layer, and a custom property does not cross siblings.
+const styleRoot = el('html').style;
 ok('the size and opacity sliders reach the stylesheet',
-    String(el('touchUI').style['--tsize']) === '1.25' && String(el('touchUI').style['--topaque']) === '0.62',
-    `${el('touchUI').style['--tsize']} / ${el('touchUI').style['--topaque']}`);
+    String(styleRoot['--tsize']) === '1.25' && String(styleRoot['--topaque']) === '0.62',
+    `${styleRoot['--tsize']} / ${styleRoot['--topaque']}`);
 settings.ctrlOpacity = 5;      // a hand-edited profile must not blind anyone
 step(1);
-ok('and the opacity is clamped', parseFloat(el('touchUI').style['--topaque']) <= 0.95,
-    String(el('touchUI').style['--topaque']));
+ok('and the opacity is clamped', parseFloat(styleRoot['--topaque']) <= 0.95,
+    String(styleRoot['--topaque']));
 settings.ctrlOpacity = 0.5;
 // death drops everything
 press('tFire', 13); stick.down(); stick.move(stickAt(150, 150));

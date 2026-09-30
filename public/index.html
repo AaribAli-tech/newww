@@ -6,8 +6,8 @@
       user-scalable=no, viewport-fit=cover">
 <title>NUKETOWN</title>
 
-<link rel="stylesheet" href="/css/styles.6197ce7e7b.css">
-<link rel="preload" as="script" crossorigin href="/js/game.86ed3d8781.js">
+<link rel="stylesheet" href="/css/styles.12ecc0dad5.css">
+<link rel="preload" as="script" crossorigin href="/js/game.44cc29dc6b.js">
 <link rel="preload" as="font" type="font/woff2" crossorigin href="/fonts/rajdhani-400.759a9000e4.woff2">
 <link rel="preload" as="font" type="font/woff2" crossorigin href="/fonts/teko-700.a57552efb2.woff2">
 <link rel="icon" href="/favicon.svg" type="image/svg+xml">
@@ -309,20 +309,20 @@
 </div>
 <div id="touchUI" aria-hidden="true">
   <div id="stick"><i id="stickKnob"></i></div>
-  <button class="tbtn" id="tFire" type="button"><span>&#9679;</span>FIRE</button>
-  <button class="tbtn" id="tFire2" type="button"><span>&#9679;</span></button>
-  <button class="tbtn" id="tAds" type="button"><span>&#9678;</span></button>
-  <button class="tbtn" id="tJump" type="button"><span>&#8613;</span></button>
-  <button class="tbtn" id="tCrouch" type="button"><span>&#8615;</span></button>
-  <button class="tbtn" id="tReload" type="button"><span>&#8635;</span></button>
-  <button class="tbtn" id="tSwap" type="button"><span>&#8646;</span></button>
-  <button class="tbtn" id="tSprint" type="button"><span>&#10148;</span></button>
-  <button class="tbtn" id="tBoard" type="button"><span>&#9776;</span></button>
-  <button class="tbtn hide" id="tSkip" type="button"><span>&#9197;</span></button>
-  <button class="tbtn" id="tUp" type="button"><span>&#9650;</span></button>
-  <button class="tbtn" id="tDown" type="button"><span>&#9660;</span></button>
-  <button class="tbtn" id="tNext" type="button"><span>&#9197;</span></button>
-  <button class="tbtn" id="tFull" type="button"><span>&#9974;</span></button>
+  <button class="tbtn" id="tFire" type="button" aria-label="Fire"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 2.2 15.6 5.9v13.7H8.4V5.9Z"/><path d="M8 18.6h8"/></svg>FIRE</button>
+  <button class="tbtn" id="tFire2" type="button" aria-label="Fire (second trigger)"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 2.2 15.6 5.9v13.7H8.4V5.9Z"/><path d="M8 18.6h8"/></svg></button>
+  <button class="tbtn" id="tAds" type="button" aria-label="Aim down sights"><svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="6.4"/><path d="M12 1.6v3.8M12 18.6v3.8M1.6 12h3.8M18.6 12h3.8"/></svg></button>
+  <button class="tbtn" id="tJump" type="button" aria-label="Jump"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M5 12.6 12 5.2l7 7.4"/><path d="M5 19.4h14"/></svg></button>
+  <button class="tbtn" id="tCrouch" type="button" aria-label="Crouch"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M5 9.4 12 16.8l7-7.4"/><path d="M5 20.6h14"/></svg></button>
+  <button class="tbtn" id="tReload" type="button" aria-label="Reload"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M3.4 12a8.6 8.6 0 1 0 8.6-8.6"/><path class="solid" d="M12 1.2 16.6 3.4 12 5.6Z"/></svg></button>
+  <button class="tbtn" id="tSwap" type="button" aria-label="Swap weapon"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M3.6 7.4h13"/><path d="M13.4 4.4 16.4 7.4l-3 3"/><path d="M20.4 16.6H7.4"/><path d="M10.6 13.6l-3 3 3 3"/></svg></button>
+  <button class="tbtn" id="tSprint" type="button" aria-label="Sprint"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M5 5.4 11.6 12 5 18.6"/><path d="M12.4 5.4 19 12l-6.6 6.6"/></svg></button>
+  <button class="tbtn" id="tBoard" type="button" aria-label="Scoreboard, hold"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 6.5h.01M4 12h.01M4 17.5h.01"/><path d="M8.2 6.5h11.8M8.2 12h11.8M8.2 17.5h11.8"/></svg></button>
+  <button class="tbtn hide" id="tSkip" type="button" aria-label="Skip round"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M6 5.4 14.6 12 6 18.6Z"/><path d="M18 5.4v13.2"/></svg></button>
+  <button class="tbtn" id="tUp" type="button" aria-label="Fly up"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M6 15.4 12 9.2l6 6.2"/></svg></button>
+  <button class="tbtn" id="tDown" type="button" aria-label="Fly down"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M6 8.6 12 14.8l6-6.2"/></svg></button>
+  <button class="tbtn" id="tNext" type="button" aria-label="Next player"><svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="9.4" cy="7.8" r="3.4"/><path d="M3.4 19.6a6 6 0 0 1 12 0"/><path d="M17.4 9.6 21 13l-3.6 3.4"/></svg></button>
+  <button class="tbtn" id="tFull" type="button" aria-label="Fullscreen"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 9V4h5M15 4h5v5M20 15v5h-5M9 20H4v-5"/></svg></button>
 </div>
 
 <div id="rotate"><i>&#8635;</i><b>Turn your phone</b>
@@ -392,6 +392,6 @@
   </div>
 </div>
 
-<script type="module" src="/js/game.86ed3d8781.js"></script>
+<script type="module" src="/js/game.44cc29dc6b.js"></script>
 </body>
 </html>
